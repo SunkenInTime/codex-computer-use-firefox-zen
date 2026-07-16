@@ -1,0 +1,4 @@
+dist/
+native-host/bin/
+node_modules/
+*.log

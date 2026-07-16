@@ -1,0 +1,2 @@
+import{dt as e}from"./clsx-Fi13mbhu.js";function t({pathname:t,initialRoute:n}){return e(t)||e(n)}function n(){return t(r())}function r(){if(typeof window>`u`)return{pathname:``,initialRoute:null};let e=new URL(window.location.href);return{pathname:e.pathname,initialRoute:e.searchParams.get(`initialRoute`)}}export{n as t};
+//# sourceMappingURL=is-hotkey-window-context-CpruA0-n.js.map

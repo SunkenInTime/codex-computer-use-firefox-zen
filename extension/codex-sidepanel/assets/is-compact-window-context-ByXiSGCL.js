@@ -1,0 +1,2 @@
+import{u as e}from"./app-identity-Bp_d0xrU.js";var t=[`/global-dictation`,`/global-dictation/*`,`/hotkey-window`,`/hotkey-window/*`,...[]];function n(n){return n?t.some(t=>e({path:t,end:!0},n)!=null):!1}function r({pathname:e,initialRoute:t}){return n(e)||n(t)}function i(){return r(a())}function a(){if(typeof window>`u`)return{pathname:``,initialRoute:null};let e=new URL(window.location.href);return{pathname:e.pathname,initialRoute:e.searchParams.get(`initialRoute`)}}export{i as t};
+//# sourceMappingURL=is-compact-window-context-ByXiSGCL.js.map

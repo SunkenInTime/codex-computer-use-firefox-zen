@@ -1,0 +1,2 @@
+function e(e,t){let n=e.favIconUrl?.trim();if(n==null||n.length===0)return null;let r=(e.url??e.pendingUrl??``).trim();if(r.length===0||t==null)return n;try{let e=new URL(t.getURL(`/_favicon/`));return e.searchParams.set(`pageUrl`,r),e.searchParams.set(`size`,`32`),e.toString()}catch{return n}}export{e as t};
+//# sourceMappingURL=chrome-extension-tab-favicon-DlC96Su1.js.map

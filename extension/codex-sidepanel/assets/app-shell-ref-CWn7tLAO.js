@@ -1,0 +1,2 @@
+import{o as e}from"./chunk-CFjPhJqf.js";import{d as t}from"./jsx-runtime-Dj03gGGd.js";var n=e(t(),1),r=(0,n.createContext)({current:null}),i=(0,n.createContext)(null);export{r as n,i as t};
+//# sourceMappingURL=app-shell-ref-CWn7tLAO.js.map

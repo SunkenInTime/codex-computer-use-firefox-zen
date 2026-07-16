@@ -1,0 +1,2 @@
+import{t as e}from"./chunk-CFjPhJqf.js";var t=e(((e,t)=>{function n(e,t,n){var r=-1,i=e.length;t<0&&(t=-t>i?0:i+t),n=n>i?i:n,n<0&&(n+=i),i=t>n?0:n-t>>>0,t>>>=0;for(var a=Array(i);++r<i;)a[r]=e[r+t];return a}t.exports=n}));function n(){return window.electronBridge?.getBuildFlavor?.()||`prod`}export{t as n,n as t};
+//# sourceMappingURL=get-build-flavor-BikGgEUa.js.map

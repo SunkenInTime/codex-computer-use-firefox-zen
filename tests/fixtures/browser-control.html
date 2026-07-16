@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Firefox Computer Use Test</title>
+    <style>
+      :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+      body { margin: 0; padding: 32px; }
+      main { max-width: 720px; margin: auto; }
+      label, button { display: block; margin: 16px 0; }
+      input[type="text"] { width: 100%; padding: 10px; }
+      button { padding: 10px 16px; }
+      #drag-row { display: flex; align-items: center; gap: 24px; margin: 24px 0; }
+      #drag-source, #drop-target { width: 150px; min-height: 64px; display: grid; place-items: center; border: 2px solid currentColor; }
+      #drag-source { cursor: grab; background: color-mix(in srgb, Highlight 18%, Canvas); }
+      #drop-target { border-style: dashed; }
+      iframe { width: 100%; min-height: 180px; border: 2px solid currentColor; margin: 24px 0; }
+      #spacer { height: 1100px; background: linear-gradient(transparent, color-mix(in srgb, CanvasText 8%, transparent)); }
+      #bottom { padding: 24px; border: 2px solid currentColor; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Firefox computer-use parity test</h1>
+      <img src="asset.svg" width="24" height="24" alt="Fixture asset">
+      <p id="status" role="status">ready</p>
+
+      <label for="test-input">Test text</label>
+      <input id="test-input" type="text" placeholder="Type through browser control">
+      <output id="typed-output">empty</output>
+
+      <button id="action-button" type="button">Apply test action</button>
+
+      <label>
+        <input id="test-checkbox" type="checkbox">
+        Confirm checkbox interaction
+      </label>
+
+      <label for="file-input">Upload bridge</label>
+      <input id="file-input" type="file">
+      <output id="file-output">no file</output>
+
+      <div id="drag-row">
+        <div id="drag-source" draggable="true">Drag source</div>
+        <div id="drop-target">Drop target</div>
+      </div>
+      <output id="drag-output">not dropped</output>
+
+      <button id="network-button" type="button">Fetch network fixture</button>
+      <output id="network-output">network idle</output>
+
+      <button id="metrics-button" type="button">Read emulated metrics</button>
+      <output id="metrics-output">metrics unread</output>
+
+      <button id="confirm-button" type="button">Open confirm fixture</button>
+      <button id="prompt-button" type="button">Open prompt fixture</button>
+      <output id="dialog-output">dialog idle</output>
+
+      <iframe id="cross-origin-frame" title="Cross-origin control frame" src="http://localhost:8765/frame-child.html"></iframe>
+
+      <a id="bottom-link" href="#bottom">Jump to scroll target</a>
+      <div id="spacer"></div>
+      <section id="bottom" tabindex="-1">scroll target reached</section>
+    </main>
+    <script>
+      const status = document.querySelector("#status");
+      const input = document.querySelector("#test-input");
+      const typedOutput = document.querySelector("#typed-output");
+      const checkbox = document.querySelector("#test-checkbox");
+      const fileInput = document.querySelector("#file-input");
+      const fileOutput = document.querySelector("#file-output");
+      const dragSource = document.querySelector("#drag-source");
+      const dropTarget = document.querySelector("#drop-target");
+      const dragOutput = document.querySelector("#drag-output");
+      const networkOutput = document.querySelector("#network-output");
+      const metricsOutput = document.querySelector("#metrics-output");
+      const dialogOutput = document.querySelector("#dialog-output");
+
+      input.addEventListener("input", () => {
+        typedOutput.textContent = input.value || "empty";
+      });
+      document.querySelector("#action-button").addEventListener("click", () => {
+        status.textContent = `clicked:${input.value}`;
+      });
+      checkbox.addEventListener("change", () => {
+        status.dataset.checkbox = String(checkbox.checked);
+      });
+      fileInput.addEventListener("change", async () => {
+        const file = fileInput.files?.[0];
+        fileOutput.textContent = file ? `${file.name}:${await file.text()}` : "no file";
+      });
+      dragSource.addEventListener("dragstart", (event) => {
+        event.dataTransfer.setData("text/plain", "firefox-drag-ok");
+      });
+      dropTarget.addEventListener("dragover", (event) => event.preventDefault());
+      dropTarget.addEventListener("drop", (event) => {
+        event.preventDefault();
+        dragOutput.textContent = event.dataTransfer.getData("text/plain") || "empty drop";
+      });
+      document.querySelector("#network-button").addEventListener("click", async () => {
+        const response = await fetch(`asset.svg?network=${Date.now()}`);
+        networkOutput.textContent = `${response.status}:${response.headers.get("content-type")}:${(await response.text()).includes("svg")}`;
+      });
+      document.querySelector("#metrics-button").addEventListener("click", () => {
+        metricsOutput.textContent = JSON.stringify({
+          inner: [innerWidth, innerHeight], screen: [screen.width, screen.height], dpr: devicePixelRatio,
+          touch: navigator.maxTouchPoints, language: navigator.language, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          focus: document.hasFocus(), userAgent: navigator.userAgent,
+        });
+      });
+      document.querySelector("#confirm-button").addEventListener("click", () => {
+        dialogOutput.textContent = `confirm:${confirm("firefox-confirm-fixture")}`;
+      });
+      document.querySelector("#prompt-button").addEventListener("click", () => {
+        dialogOutput.textContent = `prompt:${prompt("firefox-prompt-fixture", "default-value")}`;
+      });
+    </script>
+  </body>
+</html>

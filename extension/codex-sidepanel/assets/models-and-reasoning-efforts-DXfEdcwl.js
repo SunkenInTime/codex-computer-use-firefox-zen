@@ -1,0 +1,2 @@
+var e=`gpt-5.5`,t=`medium`,n=[`minimal`,`low`,`medium`,`high`,`xhigh`,`max`];function r(e){return e===`none`||e===`minimal`||e===`low`||e===`medium`||e===`high`||e===`xhigh`||e===`max`||e===`ultra`}export{r as i,e as n,n as r,t};
+//# sourceMappingURL=models-and-reasoning-efforts-DXfEdcwl.js.map

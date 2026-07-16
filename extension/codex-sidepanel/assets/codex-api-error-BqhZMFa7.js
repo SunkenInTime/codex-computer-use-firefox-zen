@@ -1,0 +1,2 @@
+import{Fa as e,Na as t,Oa as n}from"./clsx-Fi13mbhu.js";var r=n({detail:e([t().transform(e=>({type:null,message:e})),n({type:t(),message:t()}),n({error_code:t().optional(),message:t(),type:t().optional()}).transform(({error_code:e,message:t,type:n})=>({type:n??e??null,message:t}))])});function i(e){try{let t=r.safeParse(JSON.parse(e.message));return t.success?t.data.detail:null}catch{return null}}export{i as t};
+//# sourceMappingURL=codex-api-error-BqhZMFa7.js.map

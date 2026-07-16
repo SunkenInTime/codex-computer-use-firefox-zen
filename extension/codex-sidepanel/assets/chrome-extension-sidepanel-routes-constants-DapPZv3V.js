@@ -1,0 +1,2 @@
+import{u as e}from"./app-identity-Bp_d0xrU.js";import{Q as t,at as n}from"./clsx-Fi13mbhu.js";var r=`/new-thread`,i=t,a=`https://codex.local`;function o(e){return n(e)}function s(t){return t===`/`?`/`:t===`/new-thread`?r:e(i,t)==null?null:i}function c(e){if(e==null||!e.startsWith(`/`)||e.startsWith(`//`))return!1;try{return s(new URL(e,a).pathname)!=null}catch{return!1}}export{c as a,s as i,i as n,o as r,r as t};
+//# sourceMappingURL=chrome-extension-sidepanel-routes-constants-DapPZv3V.js.map

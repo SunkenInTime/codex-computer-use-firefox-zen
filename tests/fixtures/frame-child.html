@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Firefox Cross-Origin Frame</title>
+    <style>body { font-family: system-ui, sans-serif; padding: 12px; } input { padding: 6px; }</style>
+  </head>
+  <body>
+    <label for="frame-input">Cross-origin frame text</label>
+    <input id="frame-input" placeholder="Type inside cross-origin frame">
+    <button id="frame-button" type="button">Apply frame action</button>
+    <output id="frame-output">frame ready</output>
+    <iframe title="Nested cross-origin frame" src="http://127.0.0.1:8765/frame-grandchild.html"></iframe>
+    <script>
+      const input = document.querySelector("#frame-input");
+      document.querySelector("#frame-button").addEventListener("click", () => {
+        document.querySelector("#frame-output").textContent = `frame-clicked:${input.value}`;
+      });
+    </script>
+  </body>
+</html>

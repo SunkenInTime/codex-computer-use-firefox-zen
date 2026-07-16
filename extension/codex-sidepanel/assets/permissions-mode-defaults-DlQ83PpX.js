@@ -1,0 +1,2 @@
+import{gi as e}from"./clsx-Fi13mbhu.js";import{l as t,p as n}from"./use-reduced-motion-CD6gg5KB.js";import{t as r}from"./permissions-mode-persistence-keys-Bt6cxCtw.js";import{t as i}from"./persisted-atom-BC2eYQGk.js";var a=i(e,{},{getOnInit:!0}),o=i(r,{},{getOnInit:!0});function s(r,i){n(e,{...t(e,{}),[r]:i})}function c(e,t){return t[e]??null}export{s as i,o as n,c as r,a as t};
+//# sourceMappingURL=permissions-mode-defaults-DlQ83PpX.js.map

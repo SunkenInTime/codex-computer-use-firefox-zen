@@ -1,0 +1,116 @@
+{
+  "manifest_version": 3,
+  "name": "Codex Computer use for Firefox & Zen",
+  "description": "Use Codex computer use and its signed-in sidebar in Firefox and Zen.",
+  "version": "1.2.27203.26575",
+  "icons": {
+    "16": "images/icon16.png",
+    "32": "images/icon32.png",
+    "48": "images/icon48.png",
+    "128": "images/icon128.png"
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "codex-computer-use-firefox-zen@sunkenintime",
+      "strict_min_version": "152.0",
+      "data_collection_permissions": {
+        "required": [
+          "websiteActivity",
+          "websiteContent"
+        ],
+        "optional": [
+          "bookmarksInfo",
+          "browsingActivity",
+          "searchTerms"
+        ]
+      }
+    }
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'none'; connect-src 'self' http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:* https://ab.chatgpt.com https://chatgpt.com; font-src 'self' https://cdn.openai.com;"
+  },
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "permissions": [
+    "alarms",
+    "bookmarks",
+    "browsingData",
+    "cookies",
+    "downloads",
+    "history",
+    "nativeMessaging",
+    "notifications",
+    "scripting",
+    "sessions",
+    "storage",
+    "tabGroups",
+    "tabs",
+    "topSites",
+    "webNavigation",
+    "webRequest",
+    "webRequestBlocking",
+    "webRequestFilterResponse"
+  ],
+  "optional_permissions": [
+    "downloads.open",
+    "userScripts"
+  ],
+  "action": {
+    "default_icon": {
+      "16": "images/icon16.png",
+      "32": "images/icon32.png",
+      "48": "images/icon48.png"
+    },
+    "default_title": "Codex Computer use"
+  },
+  "commands": {
+    "open-codex-side-panel": {
+      "description": "Open the Codex computer-use sidebar",
+      "suggested_key": {
+        "default": "Ctrl+Shift+Period",
+        "mac": "Command+Shift+Period"
+      }
+    }
+  },
+  "sidebar_action": {
+    "default_icon": {
+      "16": "images/icon16.png",
+      "32": "images/icon32.png",
+      "48": "images/icon48.png"
+    },
+    "default_title": "Codex Computer use",
+    "default_panel": "codex-sidepanel/index.html",
+    "open_at_install": false
+  },
+  "background": {
+    "scripts": [
+      "firefox-compat.js",
+      "background.js"
+    ],
+    "type": "classic"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "all_frames": true,
+      "match_origin_as_fallback": true,
+      "run_at": "document_start",
+      "js": [
+        "firefox-cdp-bridge.js"
+      ]
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "resources": [
+        "images/cursor-chat.png"
+      ]
+    }
+  ]
+}

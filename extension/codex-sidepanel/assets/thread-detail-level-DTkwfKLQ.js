@@ -1,0 +1,2 @@
+import{u as e}from"./jsx-runtime-Dj03gGGd.js";import{w as t}from"./clsx-Fi13mbhu.js";import{h as n,y as r}from"./use-reduced-motion-CD6gg5KB.js";var i=e(),a=`STEPS_PROSE`,o=`STEPS_COMMANDS`;function s(e){return e===`STEPS_EXECUTION`?o:e??`STEPS_COMMANDS`}function c(e){return s(n(e,t.conversationDetailMode))===a}function l(){let e=(0,i.c)(2),n=r(t.conversationDetailMode),a;return e[0]===n?a=e[1]:(a=s(n),e[0]=n,e[1]=a),a}export{l as i,a as n,c as r,o as t};
+//# sourceMappingURL=thread-detail-level-DTkwfKLQ.js.map

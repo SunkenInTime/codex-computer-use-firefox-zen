@@ -1,0 +1,2 @@
+import{St as e,U as t,ht as n}from"./use-reduced-motion-CD6gg5KB.js";var r=e(t,!1),i=e(t,!1),a=e(t,!1),o=e(t,!1),s=n(t,({get:e})=>{let t=e(i),n=e(a);return t||n});function c(e){e.set(r,!1),e.set(i,!1),e.set(a,!1),e.set(o,!1)}function l(e,{altKey:t,ctrlKey:n,metaKey:s,shiftKey:c}){e.set(r,t),e.set(i,n),e.set(a,s),e.set(o,c)}export{l as i,r as n,s as r,c as t};
+//# sourceMappingURL=keyboard-modifier-state-CGK5-T4U.js.map

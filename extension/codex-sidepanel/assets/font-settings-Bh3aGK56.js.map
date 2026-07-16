@@ -1,0 +1,1 @@
+{"version":3,"file":"font-settings-Bh3aGK56.js","names":["DEFAULT_SANS_FONT_SIZE","MIN_SANS_FONT_SIZE","MAX_SANS_FONT_SIZE","DEFAULT_CODE_FONT_SIZE","DEFAULT_USE_FONT_SMOOTHING","CODE_FONT_FAMILY_PLACEHOLDER","MIN_CODE_FONT_SIZE","MAX_CODE_FONT_SIZE"],"sources":["../../../src/settings/font-settings.ts"],"mappings":"AAKA,IAAaK,EACX"}
