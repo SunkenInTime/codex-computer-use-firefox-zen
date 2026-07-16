@@ -53,8 +53,7 @@
     "webRequestFilterResponse"
   ],
   "optional_permissions": [
-    "downloads.open",
-    "userScripts"
+    "downloads.open"
   ],
   "action": {
     "default_icon": {

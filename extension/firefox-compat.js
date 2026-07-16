@@ -7,7 +7,6 @@
   }
 
   const OFFICIAL_CHROME_EXTENSION_ID = "hehggadaopoacecdllhhajmbjkdcmajg";
-  const USER_SCRIPT_WORLD_ID = "chatgpt-firefox-cdp";
   const BINDING_MESSAGE_SOURCE = "chatgpt-firefox-cdp";
 
   class CompatEvent {
@@ -136,25 +135,13 @@
   const sidePanelOpened = new CompatEvent();
   const sidePanelClosed = new CompatEvent();
 
-  function requestUserScriptsPermissionFromGesture() {
-    if (firefox.permissions?.request == null) {
-      return Promise.resolve(false);
-    }
-    return firefox.permissions
-      .request({ permissions: ["userScripts"] })
-      .catch(() => false);
-  }
-
   const sidePanelCompat = {
     onOpened: sidePanelOpened,
     onClosed: sidePanelClosed,
     setPanelBehavior: async () => {},
     async open({ windowId } = {}) {
-      // Both calls must begin synchronously while the toolbar click/command still
-      // counts as a Firefox user gesture.
-      const permissionRequest = requestUserScriptsPermissionFromGesture();
       const openRequest = firefox.sidebarAction.open();
-      const [, openResult] = await Promise.allSettled([permissionRequest, openRequest]);
+      const [openResult] = await Promise.allSettled([openRequest]);
       if (openResult.status === "rejected") {
         throw openResult.reason;
       }
@@ -355,13 +342,9 @@
   }
 
   async function requirePageScriptExecution() {
-    // Firefox can expose the optional userScripts API after the user enables it
-    // while permissions.contains({ permissions: ["userScripts"] }) still returns
-    // false (notably in current Zen builds). The callable API is the authoritative
-    // capability check and execute() will still reject if permission is unusable.
-    if (firefox.userScripts?.execute == null && firefox.scripting?.executeScript == null) {
+    if (firefox.scripting?.executeScript == null) {
       throw new Error(
-        "Firefox page automation requires either userScripts or scripting.executeScript support.",
+        "Firefox page automation requires scripting.executeScript support.",
       );
     }
   }
@@ -494,26 +477,16 @@
       target.frameIds = [frameId];
     }
 
-    const results = firefox.userScripts?.execute != null
-      ? await firefox.userScripts.execute({
-          js: [{ code }],
-          target,
-          world: "USER_SCRIPT",
-          worldId: USER_SCRIPT_WORLD_ID,
-          injectImmediately: true,
-        })
-      : await firefox.scripting.executeScript({
-          target,
-          world: "MAIN",
-          injectImmediately: true,
-          func: (source) => {
-            // This callback is serialized by Firefox and runs in the page's main
-            // world. It is only a fallback for Gecko builds that hide the granted
-            // MV3 userScripts namespace (observed in Zen 1.21.6b).
-            return (0, eval)(source);
-          },
-          args: [code],
-        });
+    const results = await firefox.scripting.executeScript({
+      target,
+      world: "MAIN",
+      injectImmediately: true,
+      func: (source) => {
+        // The callback is serialized by Firefox and runs in the page's main world.
+        return (0, eval)(source);
+      },
+      args: [code],
+    });
 
     const result = results.find((candidate) => candidate.frameId === (frameId ?? 0)) ?? results[0];
     if (result == null) {

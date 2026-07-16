@@ -25,7 +25,7 @@ assert(manifest.browser_specific_settings?.gecko?.id === "codex-computer-use-fir
 assert(manifest.sidebar_action?.default_panel === "codex-sidepanel/index.html", "The Firefox sidebar is not wired to the ChatGPT panel.");
 assert(manifest.background?.scripts?.[0] === "firefox-compat.js", "The compatibility layer must load before the packaged background bundle.");
 assert(manifest.background?.scripts?.[1] === "background.js", "The packaged OpenAI background bundle is missing.");
-assert(manifest.optional_permissions?.includes("userScripts"), "The isolated page-automation permission is missing.");
+assert(!manifest.optional_permissions?.includes("userScripts"), "The publication build must not request the user-script-manager-only permission.");
 for (const permission of ["browsingData", "webNavigation", "webRequest", "webRequestBlocking", "webRequestFilterResponse"]) {
   assert(manifest.permissions.includes(permission), `Firefox compatibility permission is missing: ${permission}`);
 }

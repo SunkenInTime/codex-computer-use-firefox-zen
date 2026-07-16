@@ -54,7 +54,7 @@ The OpenAI native extension host must already be installed by ChatGPT/Codex tool
 2. In Zen or Firefox, open `about:debugging#/runtime/this-firefox`.
 3. Select **Load Temporary Add-on**, then choose `extension/manifest.json`.
 4. Open the Codex computer-use sidebar from the toolbar button or its configured shortcut.
-5. If Firefox offers the optional **Run user scripts** permission, grant it. Zen builds that do not expose the `userScripts` namespace automatically use the tested main-world scripting fallback.
+5. Start a Codex computer-use task. Page execution uses Firefox's standard `scripting.executeScript` API; the add-on does not request the user-script-manager-only `userScripts` permission.
 
 Temporary add-ons are removed when the browser exits. Permanent installation requires Mozilla signing while retaining the Gecko ID `codex-computer-use-firefox-zen@sunkenintime`.
 
