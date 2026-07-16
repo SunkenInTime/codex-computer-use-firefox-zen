@@ -72,7 +72,7 @@ npx --yes web-ext lint --source-dir extension --no-input
 npm run package
 ```
 
-`npm test` validates the manifest and compatibility surface, then runs native-protocol, upload, and WebSocket-relay integration tests. Packaging writes the unsigned extension archive and its SHA-256 checksum to `dist/`.
+`npm test` validates the manifest and compatibility surface, then runs native-protocol, upload, and WebSocket-relay integration tests. Packaging writes the unsigned extension archive, a matching review-source archive generated from the committed tree, and SHA-256 checksums to `dist/`.
 
 `web-ext lint` currently reports zero errors. Its warnings are from the inherited minified OpenAI distribution (for example dynamic code and HTML construction) plus the compatibility layer's intentional page-world function serialization.
 
