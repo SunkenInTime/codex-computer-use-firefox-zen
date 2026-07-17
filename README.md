@@ -1,4 +1,4 @@
-# Codex Computer use for Firefox & Zen
+# Codex Computer Use for Zen
 
 This is a Firefox-compatible port of OpenAI's official browser extension (`hehggadaopoacecdllhhajmbjkdcmajg`), based on packaged extension version `1.2.27203.26575`. Zen is supported as a Firefox browser and was the primary live-test target.
 

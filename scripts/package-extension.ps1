@@ -34,7 +34,35 @@ if (Test-Path -LiteralPath $sourceArchive) {
 if (Test-Path -LiteralPath $sourceChecksumFile) {
   Remove-Item -LiteralPath $sourceChecksumFile -Force
 }
-Compress-Archive -Path (Join-Path $extensionDirectory '*') -DestinationPath $archive -CompressionLevel Optimal
+# Compress-Archive writes Windows path separators into ZIP entry names. Firefox
+# tolerates those entries locally, but AMO rejects them during validation. Build
+# the archive directly so every entry uses the ZIP-standard forward slash.
+Add-Type -AssemblyName System.IO.Compression
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$extensionPrefix = $extensionDirectory.TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+$archiveStream = [IO.File]::Open($archive, [IO.FileMode]::CreateNew)
+$zipArchive = [IO.Compression.ZipArchive]::new(
+  $archiveStream,
+  [IO.Compression.ZipArchiveMode]::Create,
+  $false
+)
+try {
+  Get-ChildItem -LiteralPath $extensionDirectory -Recurse -File |
+    Sort-Object FullName |
+    ForEach-Object {
+      $entryName = $_.FullName.Substring($extensionPrefix.Length).Replace('\', '/')
+      [IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
+        $zipArchive,
+        $_.FullName,
+        $entryName,
+        [IO.Compression.CompressionLevel]::Optimal
+      ) | Out-Null
+    }
+}
+finally {
+  $zipArchive.Dispose()
+  $archiveStream.Dispose()
+}
 $hash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
 "$hash  $([IO.Path]::GetFileName($archive))" | Set-Content -LiteralPath $checksumFile -Encoding ascii
 

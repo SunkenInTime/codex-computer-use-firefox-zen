@@ -1,6 +1,6 @@
 # Privacy disclosure
 
-Codex Computer use for Firefox & Zen is an independent compatibility port. The port does not add advertising, sell data, or add its own analytics service.
+Codex Computer Use for Zen is an independent compatibility port. The port does not add advertising, sell data, or add its own analytics service.
 
 When you explicitly use computer-use features, the extension can access website content and website activity in the tabs you ask it to control. This access is necessary to inspect page structure, capture visible screenshots, navigate, enter text, click controls, upload files you select, and return results to the computer-use client. The extension also uses a machine-local native-messaging adapter to reach the officially installed OpenAI extension host.
 
