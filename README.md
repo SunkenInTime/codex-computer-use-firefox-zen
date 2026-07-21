@@ -1,6 +1,6 @@
 # Codex Computer Use for Zen
 
-This is a Firefox-compatible port of OpenAI's official browser extension (`hehggadaopoacecdllhhajmbjkdcmajg`), based on packaged extension version `1.2.27203.26575`. Zen is supported as a Firefox browser and was the primary live-test target.
+This is a Firefox-compatible port of OpenAI's official browser extension (`hehggadaopoacecdllhhajmbjkdcmajg`), based on packaged extension version `1.2.27203.26576`. Zen is supported as a Firefox browser and was the primary live-test target.
 
 This is an independent compatibility project. It is not an official OpenAI, Mozilla, or Zen Browser release and is not endorsed by those organizations. You need an existing ChatGPT/Codex installation and account; this repository does not include or bypass account access.
 

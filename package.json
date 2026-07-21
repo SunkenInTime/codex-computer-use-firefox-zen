@@ -1,11 +1,11 @@
 {
   "name": "codex-computer-use-firefox-zen",
   "private": true,
-  "version": "1.2.27203-firefox.26575",
+  "version": "1.2.27203-firefox.26576",
   "description": "Codex computer-use compatibility port for Firefox and Zen",
   "scripts": {
     "check": "node scripts/verify-extension.mjs",
-    "test": "npm run check && node tests/test-firefox-compat.mjs && node tests/test-native-host.mjs",
+    "test": "npm run check && node tests/test-sidepanel-focus-compat.mjs && node tests/test-firefox-compat.mjs && node tests/test-native-host.mjs",
     "package": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-extension.ps1"
   }
 }
