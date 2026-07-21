@@ -1,4 +1,4 @@
-# Codex Computer Use for Zen — port status
+# Codex Computer Use for Firefox & Zen — port status
 
 Live verification was completed on July 15, 2026 with Zen 1.21.6b, Gecko/Firefox 152.0.5, and the packaged OpenAI extension version `1.2.27203.26575`. All work described here stays in the normal WebExtension tier: no browser flags, patched Zen build, privileged experiment API, or external automation daemon is required.
 

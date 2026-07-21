@@ -1,13 +1,13 @@
 {
   "manifest_version": 3,
-  "name": "Codex Computer Use for Zen",
-  "description": "Use Codex computer use and its signed-in sidebar in Firefox and Zen.",
+  "name": "Codex Computer Use for Firefox & Zen",
+  "description": "Bring Codex computer use and its signed-in sidebar to Firefox and Zen Browser.",
   "version": "1.2.27203.26576",
   "icons": {
-    "16": "images/icon16.png",
-    "32": "images/icon32.png",
-    "48": "images/icon48.png",
-    "128": "images/icon128.png"
+    "16": "images/firefox-zen-icon16.png",
+    "32": "images/firefox-zen-icon32.png",
+    "48": "images/firefox-zen-icon48.png",
+    "128": "images/firefox-zen-icon128.png"
   },
   "browser_specific_settings": {
     "gecko": {
@@ -57,11 +57,11 @@
   ],
   "action": {
     "default_icon": {
-      "16": "images/icon16.png",
-      "32": "images/icon32.png",
-      "48": "images/icon48.png"
+      "16": "images/firefox-zen-icon16.png",
+      "32": "images/firefox-zen-icon32.png",
+      "48": "images/firefox-zen-icon48.png"
     },
-    "default_title": "Codex Computer use"
+    "default_title": "Codex for Firefox & Zen"
   },
   "commands": {
     "open-codex-side-panel": {
@@ -74,11 +74,11 @@
   },
   "sidebar_action": {
     "default_icon": {
-      "16": "images/icon16.png",
-      "32": "images/icon32.png",
-      "48": "images/icon48.png"
+      "16": "images/firefox-zen-icon16.png",
+      "32": "images/firefox-zen-icon32.png",
+      "48": "images/firefox-zen-icon48.png"
     },
-    "default_title": "Codex Computer use",
+    "default_title": "Codex for Firefox & Zen",
     "default_panel": "codex-sidepanel/index.html",
     "open_at_install": false
   },

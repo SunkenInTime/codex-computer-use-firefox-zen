@@ -2,15 +2,15 @@
 
 ## Name
 
-Codex Computer Use for Zen
+Codex Computer Use for Firefox & Zen
 
 ## Summary
 
-Use Codex computer-use capabilities and its signed-in sidebar in Firefox and Zen.
+Bring Codex computer-use capabilities and its signed-in sidebar to Firefox and Zen Browser.
 
 ## Description
 
-Codex Computer Use for Zen brings the OpenAI browser-extension workflow to Firefox-family browsers through a normal WebExtension.
+Codex Computer Use for Firefox & Zen brings the OpenAI browser-extension workflow to Firefox-family browsers through a normal WebExtension.
 
 The compatibility layer translates the browser-control operations used by Codex into Firefox APIs while retaining the signed-in sidebar experience. It supports semantic page inspection, clicks, typing, keyboard and pointer input, screenshots, navigation, downloads and uploads, cookies, nested cross-origin frames, network inspection, request interception, device emulation, and common JavaScript dialogs.
 
