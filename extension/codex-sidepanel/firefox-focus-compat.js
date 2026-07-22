@@ -25,6 +25,20 @@
   );
 
   window.addEventListener(
+    "mousedown",
+    (event) => {
+      if (!event.target?.closest?.("[aria-haspopup]")) return;
+
+      // Radix prevents pointerdown's default action while opening a menu, but
+      // Firefox still focuses the trigger during the following compatibility
+      // mousedown. Radix then sees that focus as outside its portaled content
+      // and dismisses the menu. Prevent only that redundant focus change.
+      event.preventDefault();
+    },
+    true,
+  );
+
+  window.addEventListener(
     "blur",
     (event) => {
       if (performance.now() > suppressBlurUntil) return;
