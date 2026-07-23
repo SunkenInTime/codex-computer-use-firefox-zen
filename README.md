@@ -44,18 +44,45 @@ See [PORT_STATUS.md](PORT_STATUS.md) for the test evidence and the remaining low
 ## Install
 
 The Firefox add-on and its companion bridge are versioned together. Release
-`1.3.0` adds companion installers for Windows and macOS:
+`1.4.0` provides three supported ways to install the companion:
 
 - Windows: run `codex-firefox-bridge-<version>-windows-x64-setup.exe`. It installs
   per-user and does not require administrator access.
 - macOS: open `codex-firefox-bridge-<version>-macos-universal.pkg`. The universal
   package supports both Apple Silicon and Intel Macs.
+- npm (Windows or macOS):
+
+  ```sh
+  npx --yes codex-firefox-bridge@1.4.0 install
+  ```
+
+  This is a persistent per-user installation, not a bridge that only lives for
+  the duration of `npx`. Inspect it later with
+  `npx --yes codex-firefox-bridge@1.4.0 doctor`, or remove it with the
+  corresponding `uninstall` command.
 
 Install the companion once, then install the matching signed Firefox add-on.
 The bridge discovers the official OpenAI extension host at runtime, so it does
 not retain a repository path or a machine-specific Codex cache path. An existing
 Codex/ChatGPT installation and the official Chrome integration are still
 required.
+
+### Why is the companion required?
+
+Firefox WebExtensions are intentionally sandboxed: they cannot launch an
+arbitrary local program, attach to Codex's private standard-input/output
+transport, or reuse a native-messaging host registered only for a Chrome
+extension ID. Codex currently provides its browser connection through that
+native-host integration rather than a supported Firefox API or authenticated
+local app-server endpoint.
+
+The small companion is therefore the OS-level handoff Firefox requires. It
+registers for this extension, discovers the existing official OpenAI host, and
+translates the Firefox connection to it. It does not replace Codex or provide a
+remote service.
+
+If OpenAI opens an official Firefox path or another supported local connection,
+we'd love to adopt it and simplify or remove this companion :)
 
 ### Local development
 
@@ -105,10 +132,12 @@ surface, then runs native-protocol, upload, and WebSocket-relay integration
 tests. Packaging writes the unsigned extension archive, a matching review-source
 archive generated from the committed tree, and SHA-256 checksums to `dist/`.
 
-Pushing a semantic-version tag such as `v1.3.0` runs the release workflow. It
+Pushing a semantic-version tag such as `v1.4.0` runs the release workflow. It
 builds and tests the extension, a Windows x64 installer, and a universal macOS
-package; verifies that the tag, extension, package, and companion versions
-match; generates checksums; and attaches all artifacts to the GitHub release.
+package; verifies that the tag, extension, npm package, and companion versions
+match; generates checksums; and attaches the installers, raw bridge binaries,
+and npm tarball to the GitHub release. If `NPM_TOKEN` is configured, it also
+publishes the npm package with provenance.
 Prepare the next version with `npm run version:set -- MAJOR.MINOR.PATCH`; this
 updates every version-bearing file together. Production releases should configure
 the signing secrets described in `.github/workflows/release.yml`.

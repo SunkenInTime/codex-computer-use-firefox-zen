@@ -26,11 +26,40 @@
           <span>Universal package · Apple Silicon and Intel</span>
         </a>
       </section>
+      <section class="developer-install" aria-labelledby="developer-install-title">
+        <div>
+          <p class="option-label">Developer path</p>
+          <h2 id="developer-install-title">Install with npm</h2>
+          <p>
+            Prefer a terminal? This installs and registers the same bridge
+            per-user. It remains installed after the command exits.
+          </p>
+        </div>
+        <div class="command-row">
+          <code id="npm-command">npx --yes codex-firefox-bridge@VERSION install</code>
+          <button id="copy-npm-command" type="button">Copy</button>
+        </div>
+      </section>
       <ol>
-        <li>Download and run the companion for this computer.</li>
+        <li>Choose a platform installer or the npm command above.</li>
         <li>Keep the existing Codex Chrome integration installed.</li>
         <li>Close this page and reopen the Codex sidebar.</li>
       </ol>
+      <section class="why" aria-labelledby="why-title">
+        <h2 id="why-title">Why is this needed?</h2>
+        <p>
+          Firefox extensions cannot launch local programs or reuse a native host
+          registered for a Chrome extension. Codex currently exposes its browser
+          connection through that native-host path, not through a supported
+          Firefox API or authenticated local endpoint. The companion crosses
+          that browser/operating-system boundary and translates the connection
+          to the official Codex host.
+        </p>
+        <p>
+          If OpenAI opens an official Firefox route or another supported local
+          connection, we'd love to use it and simplify or remove this companion :)
+        </p>
+      </section>
       <p class="footnote">
         This independent compatibility project is not an official OpenAI or
         Mozilla release. Installer source and checksums are included with every

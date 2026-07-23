@@ -6,11 +6,27 @@
     `https://github.com/SunkenInTime/codex-computer-use-firefox-zen/releases/download/v${version}`;
   const windows = document.querySelector("#windows-download");
   const macos = document.querySelector("#macos-download");
+  const npmCommand = document.querySelector("#npm-command");
+  const copyNpmCommand = document.querySelector("#copy-npm-command");
+  const command = `npx --yes codex-firefox-bridge@${version} install`;
 
   windows.href =
     `${releaseBase}/codex-firefox-bridge-${version}-windows-x64-setup.exe`;
   macos.href =
     `${releaseBase}/codex-firefox-bridge-${version}-macos-universal.pkg`;
+  npmCommand.textContent = command;
+  copyNpmCommand.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(command);
+      copyNpmCommand.textContent = "Copied";
+      setTimeout(() => {
+        copyNpmCommand.textContent = "Copy";
+      }, 1600);
+    } catch {
+      window.getSelection()?.selectAllChildren(npmCommand);
+      copyNpmCommand.textContent = "Selected";
+    }
+  });
 
   browser.runtime.getPlatformInfo().then(({ os }) => {
     if (os === "win") {
