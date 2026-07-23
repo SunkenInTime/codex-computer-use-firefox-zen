@@ -11,6 +11,20 @@ $checksumFile = Join-Path $distDirectory "codex-computer-use-firefox-zen-$($mani
 $sourceArchive = Join-Path $distDirectory "codex-computer-use-firefox-zen-$($manifest.version)-source.zip"
 $sourceChecksumFile = Join-Path $distDirectory "codex-computer-use-firefox-zen-$($manifest.version)-source.sha256"
 
+function Get-Sha256 {
+  param([Parameter(Mandatory)][string]$Path)
+
+  $stream = [IO.File]::OpenRead($Path)
+  $algorithm = [Security.Cryptography.SHA256]::Create()
+  try {
+    return [BitConverter]::ToString($algorithm.ComputeHash($stream)).Replace('-', '').ToLowerInvariant()
+  }
+  finally {
+    $algorithm.Dispose()
+    $stream.Dispose()
+  }
+}
+
 & node (Join-Path $PSScriptRoot 'verify-extension.mjs')
 if ($LASTEXITCODE -ne 0) {
   throw 'Extension verification failed; package was not created.'
@@ -63,14 +77,14 @@ finally {
   $zipArchive.Dispose()
   $archiveStream.Dispose()
 }
-$hash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+$hash = Get-Sha256 -Path $archive
 "$hash  $([IO.Path]::GetFileName($archive))" | Set-Content -LiteralPath $checksumFile -Encoding ascii
 
 & git -C $root archive --format=zip "--output=$sourceArchive" HEAD
 if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $sourceArchive)) {
   throw 'The review-source archive could not be generated from the current commit.'
 }
-$sourceHash = (Get-FileHash -LiteralPath $sourceArchive -Algorithm SHA256).Hash.ToLowerInvariant()
+$sourceHash = Get-Sha256 -Path $sourceArchive
 "$sourceHash  $([IO.Path]::GetFileName($sourceArchive))" | Set-Content -LiteralPath $sourceChecksumFile -Encoding ascii
 
 Get-Item -LiteralPath $archive, $checksumFile, $sourceArchive, $sourceChecksumFile | Select-Object FullName, Length, LastWriteTime
