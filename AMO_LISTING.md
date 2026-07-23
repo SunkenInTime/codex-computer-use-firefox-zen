@@ -26,8 +26,8 @@ This is an independent compatibility project and is not an official OpenAI, Mozi
 
 ## Notes for reviewers
 
-The Firefox compatibility layer is readable source in `extension/firefox-compat.js`, `extension/firefox-cdp-bridge.js`, and `native-host/NativeHostProxy.cs`. Run `npm test` for static and protocol verification and `npm run package` to reproduce the extension and review-source archives.
+The Firefox compatibility layer is readable source in `extension/firefox-compat.js`, `extension/firefox-cdp-bridge.js`, and `native-host/src/main.rs`. Run `npm test` for static and protocol verification and `npm run package` to reproduce the extension and review-source archives. The Rust companion is released for Windows and as a universal Intel/Apple Silicon macOS package.
 
-The project retains OpenAI's packaged `extension/background.js` and side-panel bundles. The side-panel HTML loads the readable Firefox-specific `firefox-focus-compat.js` shim before the upstream bundle. Source maps shipped by OpenAI are included, but the project does not possess OpenAI's pre-bundle source or build system. The add-on requires the officially installed OpenAI native extension host and a user-supplied ChatGPT/Codex account. No reviewer credentials are embedded in the add-on or source archive.
+The project retains OpenAI's packaged `extension/background.js` and side-panel bundles. The side-panel HTML loads the readable Firefox-specific `firefox-focus-compat.js` shim before the upstream bundle. Source maps shipped by OpenAI are included, but the project does not possess OpenAI's pre-bundle source or build system. The add-on requires the separately installed companion, the officially installed OpenAI native extension host, and a user-supplied ChatGPT/Codex account. No reviewer credentials are embedded in the add-on or source archive.
 
 The extension requests broad browser permissions because browser control is its primary disclosed function. Website content and activity are transmitted only when the user invokes computer use. The machine-local native-messaging adapter pins its relay origin to the official OpenAI extension ID and rejects unrelated messages.

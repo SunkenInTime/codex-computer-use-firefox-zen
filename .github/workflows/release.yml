@@ -1,0 +1,166 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: dtolnay/rust-toolchain@stable
+      - run: npm test
+      - run: npm run package
+      - uses: actions/upload-artifact@v4
+        with:
+          name: firefox-extension
+          path: dist/*
+
+  windows-companion:
+    runs-on: windows-latest
+    env:
+      WINDOWS_SIGNING_CERTIFICATE_PFX: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_PFX }}
+      WINDOWS_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --manifest-path native-host/Cargo.toml
+      - run: cargo build --release --locked --manifest-path native-host/Cargo.toml
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $version = (Get-Content version.json -Raw | ConvertFrom-Json).version
+          $env:CODEX_FIREFOX_BRIDGE_VERSION = $version
+          $env:CODEX_FIREFOX_BRIDGE_BINARY = (Resolve-Path native-host/target/release/codex-firefox-bridge.exe).Path
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+            choco install innosetup --no-progress -y
+          }
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" installer/windows/codex-firefox-bridge.iss
+          New-Item dist -ItemType Directory -Force | Out-Null
+          Copy-Item installer/windows/Output/*.exe dist/
+      - name: Sign Windows installer
+        if: env.WINDOWS_SIGNING_CERTIFICATE_PFX != ''
+        shell: pwsh
+        env:
+          SIGNING_CERTIFICATE: ${{ env.WINDOWS_SIGNING_CERTIFICATE_PFX }}
+          SIGNING_PASSWORD: ${{ env.WINDOWS_SIGNING_CERTIFICATE_PASSWORD }}
+        run: |
+          $certificate = Join-Path $env:RUNNER_TEMP signing-certificate.pfx
+          [IO.File]::WriteAllBytes($certificate, [Convert]::FromBase64String($env:SIGNING_CERTIFICATE))
+          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Filter signtool.exe -Recurse |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+          & $signtool.FullName sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f $certificate /p $env:SIGNING_PASSWORD (Get-ChildItem dist\*.exe).FullName
+      - name: Checksum Windows installer
+        shell: pwsh
+        run: |
+          $version = (Get-Content version.json -Raw | ConvertFrom-Json).version
+          Get-FileHash dist/* -Algorithm SHA256 |
+            ForEach-Object { "$($_.Hash.ToLowerInvariant())  $([IO.Path]::GetFileName($_.Path))" } |
+            Set-Content "dist/codex-firefox-bridge-$version-windows-x64.sha256" -Encoding ascii
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-companion
+          path: dist/*
+
+  macos-companion:
+    runs-on: macos-14
+    env:
+      MACOS_INSTALLER_CERTIFICATE_P12: ${{ secrets.MACOS_INSTALLER_CERTIFICATE_P12 }}
+      MACOS_INSTALLER_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_INSTALLER_CERTIFICATE_PASSWORD }}
+      MACOS_INSTALLER_IDENTITY: ${{ secrets.MACOS_INSTALLER_IDENTITY }}
+      MACOS_NOTARY_APPLE_ID: ${{ secrets.MACOS_NOTARY_APPLE_ID }}
+      MACOS_NOTARY_TEAM_ID: ${{ secrets.MACOS_NOTARY_TEAM_ID }}
+      MACOS_NOTARY_APP_PASSWORD: ${{ secrets.MACOS_NOTARY_APP_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - run: cargo test --manifest-path native-host/Cargo.toml
+      - run: cargo build --release --locked --manifest-path native-host/Cargo.toml --target aarch64-apple-darwin
+      - run: cargo build --release --locked --manifest-path native-host/Cargo.toml --target x86_64-apple-darwin
+      - name: Build universal package
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./version.json').version")"
+          root="$RUNNER_TEMP/pkg-root"
+          scripts="$RUNNER_TEMP/pkg-scripts"
+          mkdir -p "$root/Library/Application Support/Codex Firefox Bridge" "$scripts" dist
+          lipo -create \
+            native-host/target/aarch64-apple-darwin/release/codex-firefox-bridge \
+            native-host/target/x86_64-apple-darwin/release/codex-firefox-bridge \
+            -output "$root/Library/Application Support/Codex Firefox Bridge/codex-firefox-bridge"
+          cp installer/macos/com.openai.codexextension.json \
+            "$root/Library/Application Support/Codex Firefox Bridge/"
+          cp installer/macos/scripts/postinstall "$scripts/postinstall"
+          chmod 755 "$root/Library/Application Support/Codex Firefox Bridge/codex-firefox-bridge" "$scripts/postinstall"
+          pkgbuild \
+            --root "$root" \
+            --scripts "$scripts" \
+            --ownership recommended \
+            --identifier "com.sunkenintime.codex-firefox-bridge" \
+            --version "$version" \
+            "dist/codex-firefox-bridge-$version-macos-universal.pkg"
+      - name: Sign and notarize macOS package
+        if: env.MACOS_INSTALLER_CERTIFICATE_P12 != ''
+        shell: bash
+        env:
+          INSTALLER_CERTIFICATE: ${{ env.MACOS_INSTALLER_CERTIFICATE_P12 }}
+          INSTALLER_CERTIFICATE_PASSWORD: ${{ env.MACOS_INSTALLER_CERTIFICATE_PASSWORD }}
+          INSTALLER_IDENTITY: ${{ env.MACOS_INSTALLER_IDENTITY }}
+          APPLE_ID: ${{ env.MACOS_NOTARY_APPLE_ID }}
+          APPLE_TEAM_ID: ${{ env.MACOS_NOTARY_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ env.MACOS_NOTARY_APP_PASSWORD }}
+        run: |
+          set -euo pipefail
+          keychain="$RUNNER_TEMP/release-signing.keychain-db"
+          certificate="$RUNNER_TEMP/installer-certificate.p12"
+          echo "$INSTALLER_CERTIFICATE" | base64 --decode > "$certificate"
+          security create-keychain -p release "$keychain"
+          security unlock-keychain -p release "$keychain"
+          security import "$certificate" -k "$keychain" -P "$INSTALLER_CERTIFICATE_PASSWORD" -T /usr/bin/productsign
+          security set-key-partition-list -S apple-tool:,apple: -s -k release "$keychain"
+          package="$(echo dist/*.pkg)"
+          productsign --sign "$INSTALLER_IDENTITY" "$package" "$RUNNER_TEMP/signed.pkg"
+          mv "$RUNNER_TEMP/signed.pkg" "$package"
+          xcrun notarytool submit "$package" \
+            --apple-id "$APPLE_ID" \
+            --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_APP_PASSWORD" \
+            --wait
+          xcrun stapler staple "$package"
+      - name: Checksum macOS package
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./version.json').version")"
+          shasum -a 256 dist/*.pkg > "dist/codex-firefox-bridge-$version-macos-universal.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-companion
+          path: dist/*
+
+  publish:
+    if: github.ref_type == 'tag'
+    needs: [verify, windows-companion, macos-companion]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: release
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: release/*

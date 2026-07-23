@@ -1,0 +1,9 @@
+{
+  "name": "com.openai.codexextension",
+  "description": "Codex Firefox native-messaging bridge",
+  "path": "/Library/Application Support/Codex Firefox Bridge/codex-firefox-bridge",
+  "type": "stdio",
+  "allowed_extensions": [
+    "codex-computer-use-firefox-zen@sunkenintime"
+  ]
+}
