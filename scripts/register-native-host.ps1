@@ -3,10 +3,9 @@ param()
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
-$source = Join-Path $root 'native-host\NativeHostProxy.cs'
 $outputDirectory = Join-Path $root 'native-host\bin'
-$output = Join-Path $outputDirectory 'chatgpt-firefox-native-host.exe'
-$pathFile = Join-Path $outputDirectory 'native-host-proxy.path'
+$output = Join-Path $outputDirectory 'codex-firefox-bridge.exe'
+$pathFile = Join-Path $outputDirectory 'original-host.path'
 $manifestPath = Join-Path $outputDirectory 'com.openai.codexextension.json'
 $chromeRegistryPath = 'Registry::HKEY_CURRENT_USER\Software\Google\Chrome\NativeMessagingHosts\com.openai.codexextension'
 $firefoxRegistryPath = 'HKCU:\Software\Mozilla\NativeMessagingHosts\com.openai.codexextension'
@@ -23,24 +22,26 @@ if (-not (Test-Path -LiteralPath $originalHost -PathType Leaf)) {
 }
 
 New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null
-$compiler = "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
-if (-not (Test-Path -LiteralPath $compiler)) {
-  $compiler = "$env:WINDIR\Microsoft.NET\Framework\v4.0.30319\csc.exe"
+$cargo = Get-Command cargo -ErrorAction SilentlyContinue
+if (-not $cargo) {
+  $cargoPath = Join-Path $env:USERPROFILE '.cargo\bin\cargo.exe'
+  if (Test-Path -LiteralPath $cargoPath) {
+    $cargo = Get-Item -LiteralPath $cargoPath
+  }
 }
-if (-not (Test-Path -LiteralPath $compiler)) {
-  throw 'The .NET Framework C# compiler was not found.'
+if (-not $cargo) {
+  throw 'Rust/Cargo is required for a development build. Release users should run the companion installer.'
 }
-
-& $compiler /nologo /target:exe /optimize+ "/out:$output" /reference:System.Web.Extensions.dll $source
-if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $output)) {
-  throw 'The Firefox native-host adapter failed to compile.'
-}
+$cargoExecutable = if ($cargo.Source) { $cargo.Source } else { $cargo.FullName }
+& $cargoExecutable build --release --locked --manifest-path (Join-Path $root 'native-host\Cargo.toml')
+if ($LASTEXITCODE -ne 0) { throw 'The Firefox companion failed to compile.' }
+Copy-Item -LiteralPath (Join-Path $root 'native-host\target\release\codex-firefox-bridge.exe') -Destination $output -Force
 
 $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
 [IO.File]::WriteAllText($pathFile, $originalHost + [Environment]::NewLine, $utf8NoBom)
 $firefoxManifest = [ordered]@{
   name = 'com.openai.codexextension'
-  description = 'Codex computer use Firefox native-messaging adapter'
+  description = 'Codex Firefox native-messaging bridge'
   path = $output
   type = 'stdio'
   allowed_extensions = @('codex-computer-use-firefox-zen@sunkenintime')

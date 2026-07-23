@@ -47,6 +47,10 @@ for (const contentScript of manifest.content_scripts ?? []) {
 }
 
 assert(existsInExtension(manifest.sidebar_action.default_panel), "The ChatGPT sidebar HTML is missing.");
+for (const setupFile of ["companion-required.html", "companion-required.css", "companion-required.js"]) {
+  assert(existsInExtension(setupFile), `Missing companion setup asset: ${setupFile}`);
+}
+new vm.Script(read("extension/companion-required.js"), { filename: "companion-required.js" });
 for (const [size, icon] of Object.entries(manifest.icons)) {
   assert(existsInExtension(icon), `Missing ${size}px icon: ${icon}`);
 }
@@ -57,6 +61,7 @@ for (const match of sidebarHtml.matchAll(/(?:src|href)="\.\/([^"?#]+)"/gu)) {
 }
 
 const compatibilitySource = read("extension/firefox-compat.js");
+assert(compatibilitySource.includes("companionSetupShown:"), "Missing one-time companion setup guidance.");
 const coreCdpMethods = [
   "DOM.describeNode",
   "DOM.getBoxModel",
@@ -120,9 +125,10 @@ for (const method of coreCdpMethods) {
   assert(compatibilitySource.includes(`"${method}"`), `Core browser-client command is not translated: ${method}`);
 }
 
-const nativeHostSource = read("native-host/NativeHostProxy.cs");
+const nativeHostSource = read("native-host/src/main.rs");
 assert(nativeHostSource.includes("hehggadaopoacecdllhhajmbjkdcmajg"), "The native adapter is not pinned to the official OpenAI extension origin.");
 assert(nativeHostSource.includes("DOM.setFileInputFiles"), "The native adapter does not bridge local file uploads.");
+assert(nativeHostSource.includes("target_os = \"macos\""), "The native adapter does not include macOS host discovery.");
 
 for (const fixture of ["browser-control.html", "frame-child.html", "frame-grandchild.html", "asset.svg", "upload.txt"]) {
   assert(fs.existsSync(path.join(root, "tests", "fixtures", fixture)), `Missing browser-control fixture: ${fixture}`);

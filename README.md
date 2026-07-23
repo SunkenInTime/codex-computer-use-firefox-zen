@@ -1,6 +1,6 @@
-# Codex Computer Use for Zen
+# Codex Computer Use for Zen & Fox
 
-This is a Firefox-compatible port of OpenAI's official browser extension (`hehggadaopoacecdllhhajmbjkdcmajg`), based on packaged extension version `1.2.27203.26575`. Zen is supported as a Firefox browser and was the primary live-test target.
+This is a Firefox-compatible port of OpenAI's official browser extension (`hehggadaopoacecdllhhajmbjkdcmajg`), based on packaged extension version `1.2.27203.26576`. Zen is supported as a Firefox browser and was the primary live-test target.
 
 This is an independent compatibility project. It is not an official OpenAI, Mozilla, or Zen Browser release and is not endorsed by those organizations. You need an existing ChatGPT/Codex installation and account; this repository does not include or bypass account access.
 
@@ -41,14 +41,36 @@ The port has been exercised against the real signed-in OpenAI sidebar in Zen, no
 
 See [PORT_STATUS.md](PORT_STATUS.md) for the test evidence and the remaining low-level Firefox limitations.
 
-## Install for local development
+## Install
+
+The Firefox add-on and its companion bridge are versioned together. Release
+`1.3.0` adds companion installers for Windows and macOS:
+
+- Windows: run `codex-firefox-bridge-<version>-windows-x64-setup.exe`. It installs
+  per-user and does not require administrator access.
+- macOS: open `codex-firefox-bridge-<version>-macos-universal.pkg`. The universal
+  package supports both Apple Silicon and Intel Macs.
+
+Install the companion once, then install the matching signed Firefox add-on.
+The bridge discovers the official OpenAI extension host at runtime, so it does
+not retain a repository path or a machine-specific Codex cache path. An existing
+Codex/ChatGPT installation and the official Chrome integration are still
+required.
+
+### Local development
 
 The OpenAI native extension host must already be installed by ChatGPT/Codex tooling on this machine.
 
-1. Register the Firefox native-host adapter:
+1. Build and register the Firefox companion:
 
+   Windows:
    ```powershell
    .\scripts\register-native-host.ps1
+   ```
+
+   macOS:
+   ```sh
+   ./scripts/register-native-host.sh
    ```
 
 2. In Zen or Firefox, open `about:debugging#/runtime/this-firefox`.
@@ -58,10 +80,16 @@ The OpenAI native extension host must already be installed by ChatGPT/Codex tool
 
 Temporary add-ons are removed when the browser exits. Permanent installation requires Mozilla signing while retaining the Gecko ID `codex-computer-use-firefox-zen@sunkenintime`.
 
-To remove only the Firefox native-host registration:
+To remove only the development registration:
 
+Windows:
 ```powershell
 .\scripts\unregister-native-host.ps1
+```
+
+macOS:
+```sh
+./scripts/unregister-native-host.sh
 ```
 
 ## Verify and package
@@ -72,7 +100,18 @@ npx --yes web-ext lint --source-dir extension --no-input
 npm run package
 ```
 
-`npm test` validates the manifest and compatibility surface, then runs native-protocol, upload, and WebSocket-relay integration tests. Packaging writes the unsigned extension archive, a matching review-source archive generated from the committed tree, and SHA-256 checksums to `dist/`.
+`npm test` validates synchronized release versions, the manifest and compatibility
+surface, then runs native-protocol, upload, and WebSocket-relay integration
+tests. Packaging writes the unsigned extension archive, a matching review-source
+archive generated from the committed tree, and SHA-256 checksums to `dist/`.
+
+Pushing a semantic-version tag such as `v1.3.0` runs the release workflow. It
+builds and tests the extension, a Windows x64 installer, and a universal macOS
+package; verifies that the tag, extension, package, and companion versions
+match; generates checksums; and attaches all artifacts to the GitHub release.
+Prepare the next version with `npm run version:set -- MAJOR.MINOR.PATCH`; this
+updates every version-bearing file together. Production releases should configure
+the signing secrets described in `.github/workflows/release.yml`.
 
 `web-ext lint` currently reports zero errors. Its warnings are from the inherited minified OpenAI distribution (for example dynamic code and HTML construction) plus the compatibility layer's intentional page-world function serialization.
 

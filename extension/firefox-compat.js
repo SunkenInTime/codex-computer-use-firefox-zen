@@ -49,6 +49,39 @@
   function createNativePortProxy(port) {
     const getInfoRequestIds = new Set();
     const listenerWrappers = new WeakMap();
+    let receivedNativeMessage = false;
+
+    port.onMessage.addListener(() => {
+      receivedNativeMessage = true;
+      firefox.action.setBadgeText({ text: "" }).catch(() => {});
+    });
+    port.onDisconnect.addListener(() => {
+      if (receivedNativeMessage) {
+        return;
+      }
+      const error = firefox.runtime.lastError?.message ?? "";
+      if (
+        !error.includes("native messaging host") &&
+        !error.includes("Native host has exited")
+      ) {
+        return;
+      }
+      firefox.action.setBadgeBackgroundColor({ color: "#d97706" }).catch(() => {});
+      firefox.action.setBadgeText({ text: "SETUP" }).catch(() => {});
+      const storageKey = `companionSetupShown:${firefox.runtime.getManifest().version}`;
+      firefox.storage.local.get(storageKey).then((stored) => {
+        if (stored[storageKey]) {
+          return;
+        }
+        return firefox.storage.local
+          .set({ [storageKey]: true })
+          .then(() =>
+            firefox.tabs.create({
+              url: firefox.runtime.getURL("companion-required.html"),
+            }),
+          );
+      }).catch(() => {});
+    });
 
     const onMessage = {
       addListener(listener) {

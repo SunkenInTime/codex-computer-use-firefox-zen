@@ -1,4 +1,5 @@
 dist/
 native-host/bin/
+native-host/target/
 node_modules/
 *.log

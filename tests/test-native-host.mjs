@@ -13,15 +13,18 @@ if (process.platform !== "win32") {
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), "chatgpt-firefox-native-test-"));
 const csc = path.join(process.env.WINDIR, "Microsoft.NET", "Framework64", "v4.0.30319", "csc.exe");
-const proxy = path.join(temp, "proxy.exe");
 const fixture = path.join(temp, "fixture.exe");
 const upload = path.join(temp, "firefox-upload.txt");
+const cargoCandidates = [
+  process.env.CARGO,
+  path.join(os.homedir(), ".cargo", "bin", "cargo.exe"),
+  "cargo"
+].filter(Boolean);
 
 try {
   fs.writeFileSync(upload, "Firefox file upload parity\n", "utf8");
 
   for (const [output, source, references] of [
-    [proxy, path.join(root, "native-host", "NativeHostProxy.cs"), ["System.Web.Extensions.dll"]],
     [fixture, path.join(root, "tests", "NativeHostFixture.cs"), []]
   ]) {
     const args = ["/nologo", "/target:exe", "/optimize+", `/out:${output}`];
@@ -30,6 +33,20 @@ try {
     const compilation = spawnSync(csc, args, { encoding: "utf8" });
     assert.equal(compilation.status, 0, compilation.stderr || compilation.stdout);
   }
+
+  const cargo = cargoCandidates.find((candidate) => {
+    const result = spawnSync(candidate, ["--version"], { encoding: "utf8" });
+    return result.status === 0;
+  });
+  assert.ok(cargo, "Cargo is required to build the cross-platform native bridge.");
+  const build = spawnSync(cargo, [
+    "build",
+    "--locked",
+    "--manifest-path",
+    path.join(root, "native-host", "Cargo.toml")
+  ], { encoding: "utf8", cwd: root });
+  assert.equal(build.status, 0, build.stderr || build.stdout);
+  const proxy = path.join(root, "native-host", "target", "debug", "codex-firefox-bridge.exe");
 
   const run = spawnSync(proxy, [], {
     encoding: null,

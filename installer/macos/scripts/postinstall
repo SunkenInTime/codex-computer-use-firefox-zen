@@ -1,0 +1,8 @@
+#!/bin/sh
+set -eu
+
+chmod 755 "/Library/Application Support/Codex Firefox Bridge/codex-firefox-bridge"
+mkdir -p "/Library/Application Support/Mozilla/NativeMessagingHosts"
+cp "/Library/Application Support/Codex Firefox Bridge/com.openai.codexextension.json" \
+  "/Library/Application Support/Mozilla/NativeMessagingHosts/com.openai.codexextension.json"
+chmod 644 "/Library/Application Support/Mozilla/NativeMessagingHosts/com.openai.codexextension.json"

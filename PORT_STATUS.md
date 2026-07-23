@@ -1,4 +1,4 @@
-# Codex Computer Use for Zen — port status
+# Codex Computer Use for Zen & Fox — port status
 
 Live verification was completed on July 15, 2026 with Zen 1.21.6b, Gecko/Firefox 152.0.5, and the packaged OpenAI extension version `1.2.27203.26575`. All work described here stays in the normal WebExtension tier: no browser flags, patched Zen build, privileged experiment API, or external automation daemon is required.
 
@@ -36,3 +36,13 @@ Normal ChatGPT computer-use workflows reached feature parity in testing. The rem
 6. The generated archive is unsigned. Firefox/Zen removes a temporary add-on at restart; permanent distribution requires Mozilla signing. This is an installation constraint, not a runtime feature difference.
 
 Firefox also lacks Chrome's extension debugger API and service-worker/side-panel combination used by the original package. Those are handled by the compatibility layer and do not remain user-visible limitations in the tested build.
+
+## Distribution
+
+Beginning with `1.3.0`, the extension and native companion use one synchronized
+semantic version. Tagged releases build a per-user Windows x64 setup executable
+and a universal macOS package supporting Intel and Apple Silicon. The release
+workflow can Authenticode-sign the Windows installer and Developer ID-sign,
+notarize, and staple the macOS package when the repository signing secrets are
+configured. Unsigned workflow-dispatch artifacts remain suitable for development
+testing but should not be presented as production installers.
