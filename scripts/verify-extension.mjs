@@ -51,6 +51,9 @@ for (const setupFile of ["companion-required.html", "companion-required.css", "c
   assert(existsInExtension(setupFile), `Missing companion setup asset: ${setupFile}`);
 }
 new vm.Script(read("extension/companion-required.js"), { filename: "companion-required.js" });
+const setupHtml = read("extension/companion-required.html");
+assert(setupHtml.includes("codex-firefox-bridge@"), "The npm installation path is missing from setup.");
+assert(setupHtml.includes("Why is this needed?"), "The setup page must explain why the companion is required.");
 for (const [size, icon] of Object.entries(manifest.icons)) {
   assert(existsInExtension(icon), `Missing ${size}px icon: ${icon}`);
 }

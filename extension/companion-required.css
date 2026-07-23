@@ -95,6 +95,64 @@ h1 {
   font-size: 0.8rem;
 }
 
+.developer-install,
+.why {
+  margin-top: 1.25rem;
+  padding: 1.1rem;
+  border: 1px solid rgba(23, 23, 23, 0.12);
+  border-radius: 0.9rem;
+  background: rgba(255, 255, 255, 0.45);
+}
+
+.developer-install h2,
+.why h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.developer-install p,
+.why p {
+  margin: 0.5rem 0 0;
+  color: #55504a;
+  font-size: 0.88rem;
+  line-height: 1.55;
+}
+
+.option-label {
+  color: #9a4f16 !important;
+  font-size: 0.7rem !important;
+  font-weight: 750;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.command-row {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.command-row code {
+  min-width: 0;
+  flex: 1;
+  overflow-x: auto;
+  padding: 0.7rem;
+  border-radius: 0.55rem;
+  background: #171717;
+  color: #f7f3ec;
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+.command-row button {
+  border: 1px solid rgba(23, 23, 23, 0.2);
+  border-radius: 0.55rem;
+  padding: 0 0.9rem;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
 ol {
   margin: 2rem 0;
   padding-left: 1.25rem;
@@ -138,12 +196,24 @@ ol {
 
   .lede,
   .download span,
+  .developer-install p,
+  .why p,
   .footnote {
     color: #bbb3a8;
   }
 
   .download {
     border-color: rgba(255, 255, 255, 0.15);
+  }
+
+  .developer-install,
+  .why {
+    border-color: rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.03);
+  }
+
+  .command-row button {
+    border-color: rgba(255, 255, 255, 0.2);
   }
 
   .download:hover,

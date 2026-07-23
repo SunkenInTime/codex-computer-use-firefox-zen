@@ -3,6 +3,7 @@ import fs from "node:fs";
 const release = JSON.parse(fs.readFileSync("version.json", "utf8"));
 const manifest = JSON.parse(fs.readFileSync("extension/manifest.json", "utf8"));
 const packageJson = JSON.parse(fs.readFileSync("package.json", "utf8"));
+const npmPackage = JSON.parse(fs.readFileSync("npm/package.json", "utf8"));
 const cargo = fs.readFileSync("native-host/Cargo.toml", "utf8");
 const cargoVersion = cargo.match(/^version\s*=\s*"([^"]+)"/mu)?.[1];
 const expectedTag = `v${release.version}`;
@@ -10,6 +11,7 @@ const expectedTag = `v${release.version}`;
 for (const [name, actual] of [
   ["extension manifest", manifest.version],
   ["package.json", packageJson.version],
+  ["npm package", npmPackage.version],
   ["native companion", cargoVersion]
 ]) {
   if (actual !== release.version) {

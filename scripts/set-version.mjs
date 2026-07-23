@@ -20,6 +20,9 @@ updateJson("extension/manifest.json", (value) => {
 updateJson("package.json", (value) => {
   value.version = version;
 });
+updateJson("npm/package.json", (value) => {
+  value.version = version;
+});
 
 for (const file of ["native-host/Cargo.toml", "native-host/Cargo.lock"]) {
   const source = fs.readFileSync(file, "utf8");

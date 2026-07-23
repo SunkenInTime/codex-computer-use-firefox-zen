@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: write
+  id-token: write
 
 jobs:
   verify:
@@ -47,6 +48,8 @@ jobs:
           & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" installer/windows/codex-firefox-bridge.iss
           New-Item dist -ItemType Directory -Force | Out-Null
           Copy-Item installer/windows/Output/*.exe dist/
+          Copy-Item native-host/target/release/codex-firefox-bridge.exe `
+            "dist/codex-firefox-bridge-$version-windows-x64.exe"
       - name: Sign Windows installer
         if: env.WINDOWS_SIGNING_CERTIFICATE_PFX != ''
         shell: pwsh
@@ -101,6 +104,8 @@ jobs:
             native-host/target/aarch64-apple-darwin/release/codex-firefox-bridge \
             native-host/target/x86_64-apple-darwin/release/codex-firefox-bridge \
             -output "$root/Library/Application Support/Codex Firefox Bridge/codex-firefox-bridge"
+          cp "$root/Library/Application Support/Codex Firefox Bridge/codex-firefox-bridge" \
+            "dist/codex-firefox-bridge-$version-macos-universal"
           cp installer/macos/com.openai.codexextension.json \
             "$root/Library/Application Support/Codex Firefox Bridge/"
           cp installer/macos/scripts/postinstall "$scripts/postinstall"
@@ -145,15 +150,36 @@ jobs:
         run: |
           set -euo pipefail
           version="$(node -p "require('./version.json').version")"
-          shasum -a 256 dist/*.pkg > "dist/codex-firefox-bridge-$version-macos-universal.sha256"
+          shasum -a 256 \
+            dist/*.pkg \
+            "dist/codex-firefox-bridge-$version-macos-universal" \
+            > "dist/codex-firefox-bridge-$version-macos-universal.sha256"
       - uses: actions/upload-artifact@v4
         with:
           name: macos-companion
           path: dist/*
 
+  npm-package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm test
+        working-directory: npm
+      - name: Pack npm installer
+        run: |
+          mkdir -p dist
+          npm pack ./npm --pack-destination dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: npm-installer
+          path: dist/*.tgz
+
   publish:
     if: github.ref_type == 'tag'
-    needs: [verify, windows-companion, macos-companion]
+    needs: [verify, windows-companion, macos-companion, npm-package]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -164,3 +190,22 @@ jobs:
         with:
           generate_release_notes: true
           files: release/*
+
+  publish-npm:
+    if: github.ref_type == 'tag'
+    needs: publish
+    runs-on: ubuntu-latest
+    env:
+      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - name: Publish npm installer with provenance
+        if: env.NODE_AUTH_TOKEN != ''
+        run: npm publish ./npm --access public --provenance
+      - name: Explain skipped npm publish
+        if: env.NODE_AUTH_TOKEN == ''
+        run: echo "::notice::NPM_TOKEN is not configured; the npm package was attached to the GitHub release but not published to npm."

@@ -1,0 +1,38 @@
+{
+  "name": "codex-firefox-bridge",
+  "version": "1.4.0",
+  "description": "Install and manage the Codex native-messaging bridge for Firefox and Zen",
+  "type": "module",
+  "bin": {
+    "codex-firefox-bridge": "cli.mjs"
+  },
+  "files": [
+    "cli.mjs",
+    "lib.mjs",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "codex",
+    "firefox",
+    "zen-browser",
+    "native-messaging"
+  ],
+  "homepage": "https://github.com/SunkenInTime/codex-computer-use-firefox-zen",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SunkenInTime/codex-computer-use-firefox-zen.git",
+    "directory": "npm"
+  },
+  "bugs": "https://github.com/SunkenInTime/codex-computer-use-firefox-zen/issues",
+  "license": "UNLICENSED",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}
