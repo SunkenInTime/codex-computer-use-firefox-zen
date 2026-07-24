@@ -192,11 +192,9 @@ jobs:
           files: release/*
 
   publish-npm:
-    if: github.ref_type == 'tag'
-    needs: publish
+    if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
+    needs: npm-package
     runs-on: ubuntu-latest
-    env:
-      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -204,8 +202,4 @@ jobs:
           node-version: 24
           registry-url: https://registry.npmjs.org
       - name: Publish npm installer with provenance
-        if: env.NODE_AUTH_TOKEN != ''
         run: npm publish ./npm --access public --provenance
-      - name: Explain skipped npm publish
-        if: env.NODE_AUTH_TOKEN == ''
-        run: echo "::notice::NPM_TOKEN is not configured; the npm package was attached to the GitHub release but not published to npm."
