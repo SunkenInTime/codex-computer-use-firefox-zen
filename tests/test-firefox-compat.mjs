@@ -12,6 +12,7 @@ class EventMock {
   addListener(listener) { this.listeners.push(listener); }
   removeListener(listener) { this.listeners = this.listeners.filter((candidate) => candidate !== listener); }
   hasListener(listener) { return this.listeners.includes(listener); }
+  emit(...args) { for (const listener of [...this.listeners]) listener(...args); }
 }
 
 const webRequest = {
@@ -26,18 +27,39 @@ const webRequest = {
 };
 const executedTargets = [];
 const executedSources = [];
+const createdTabs = [];
+const storedValues = {};
+const nativePort = {
+  onMessage: new EventMock(),
+  onDisconnect: new EventMock(),
+  postMessage() {},
+  disconnect() {},
+};
 const browser = {
   runtime: {
     id: "codex-computer-use-firefox-zen@sunkenintime", onMessage: new EventMock(),
     async getBrowserInfo() { return { name: "Firefox", version: "152.0", buildID: "test" }; },
-    connectNative() { throw new Error("not used"); },
+    getManifest() { return { version: "test" }; },
+    getURL(pathname) { return `moz-extension://test/${pathname}`; },
+    connectNative() { return nativePort; },
+  },
+  action: {
+    async setBadgeBackgroundColor() {},
+    async setBadgeText() {},
   },
   permissions: { async request() { return true; } },
   sidebarAction: { async open() {}, async close() {} },
+  storage: {
+    local: {
+      async get(key) { return { [key]: storedValues[key] }; },
+      async set(values) { Object.assign(storedValues, values); },
+    },
+  },
   tabs: {
     onUpdated: new EventMock(), onRemoved: new EventMock(),
     async query() { return [{ id: 1, windowId: 10, url: "https://top.test/", title: "Top", active: true }]; },
     async get() { return { id: 1, windowId: 10, url: "https://top.test/", title: "Top", active: true }; },
+    async create(details) { createdTabs.push(details); },
     async update() {}, async remove() {}, async reload() {}, async setZoom() {},
     async captureTab() { return "data:image/png;base64,dGVzdA=="; },
   },
@@ -86,6 +108,12 @@ const context = vm.createContext({
 new vm.Script(source, { filename: "firefox-compat.js" }).runInContext(context);
 const compat = context.__chatgptFirefoxCompat;
 assert.ok(compat?.debugger, "Compatibility debugger was not installed.");
+
+context.chrome.runtime.connectNative("com.openai.codexextension");
+nativePort.onDisconnect.emit();
+await new Promise((resolve) => setTimeout(resolve, 0));
+assert.equal(createdTabs.length, 1, "An immediate native disconnect must open companion setup.");
+assert.equal(createdTabs[0].url, "moz-extension://test/companion-required.html");
 
 const events = [];
 compat.debugger.onEvent.addListener((sourceInfo, method, params) => events.push({ sourceInfo, method, params }));

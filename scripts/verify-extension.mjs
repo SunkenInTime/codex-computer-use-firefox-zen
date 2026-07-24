@@ -64,7 +64,7 @@ for (const match of sidebarHtml.matchAll(/(?:src|href)="\.\/([^"?#]+)"/gu)) {
 }
 
 const compatibilitySource = read("extension/firefox-compat.js");
-assert(compatibilitySource.includes("companionSetupShown:"), "Missing one-time companion setup guidance.");
+assert(compatibilitySource.includes("companionSetupPromptShown:"), "Missing one-time companion setup guidance.");
 const coreCdpMethods = [
   "DOM.describeNode",
   "DOM.getBoxModel",

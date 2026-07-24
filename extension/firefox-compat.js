@@ -59,16 +59,9 @@
       if (receivedNativeMessage) {
         return;
       }
-      const error = firefox.runtime.lastError?.message ?? "";
-      if (
-        !error.includes("native messaging host") &&
-        !error.includes("Native host has exited")
-      ) {
-        return;
-      }
       firefox.action.setBadgeBackgroundColor({ color: "#d97706" }).catch(() => {});
       firefox.action.setBadgeText({ text: "SETUP" }).catch(() => {});
-      const storageKey = `companionSetupShown:${firefox.runtime.getManifest().version}`;
+      const storageKey = `companionSetupPromptShown:${firefox.runtime.getManifest().version}`;
       firefox.storage.local.get(storageKey).then((stored) => {
         if (stored[storageKey]) {
           return;
