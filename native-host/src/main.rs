@@ -3,20 +3,22 @@ use regex::{Captures, Regex};
 use serde_json::{json, Value};
 use std::env;
 use std::fs;
-use std::io::{self, Read, Write};
+use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{ChildStderr, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::thread;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use tempfile::TempDir;
 
 const HOST_NAME: &str = "com.openai.codexextension";
 const OFFICIAL_CHROME_ORIGIN: &str = "chrome-extension://hehggadaopoacecdllhhajmbjkdcmajg/";
 const OFFICIAL_CHROME_EXTENSION_ID: &str = "hehggadaopoacecdllhhajmbjkdcmajg";
 const FIREFOX_EXTENSION_ID: &str = "codex-computer-use-firefox-zen@sunkenintime";
 const MAX_NATIVE_MESSAGE_BYTES: usize = 1024 * 1024 * 1024;
+const CODEX_VERSION_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Debug, PartialEq)]
 struct AppServerRuntime {
@@ -46,13 +48,17 @@ fn main() {
         }
     }
 
-    if let Err(error) = run() {
-        eprintln!("[codex-firefox-bridge] {error}");
-        std::process::exit(1);
+    match run() {
+        Ok(0) => {}
+        Ok(code) => std::process::exit(code),
+        Err(error) => {
+            eprintln!("[codex-firefox-bridge] {error}");
+            std::process::exit(1);
+        }
     }
 }
 
-fn run() -> Result<(), Box<dyn std::error::Error>> {
+fn run() -> Result<i32, Box<dyn std::error::Error>> {
     let listener = TcpListener::bind(("127.0.0.1", 0))?;
     let relay_port = listener.local_addr()?.port();
     let upstream_port = Arc::new(AtomicU16::new(0));
@@ -94,13 +100,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let _ = output_thread.join();
     let _ = error_thread.join();
     drop(input_thread);
-    if let Some(directory) = fallback_registry {
-        let _ = fs::remove_dir_all(directory);
-    }
-    std::process::exit(status.code().unwrap_or(1));
+    drop(fallback_registry);
+    Ok(status.code().unwrap_or(1))
 }
 
-fn configure_app_server_runtime(command: &mut Command, host_path: &Path) -> Option<PathBuf> {
+fn configure_app_server_runtime(command: &mut Command, host_path: &Path) -> Option<TempDir> {
     let runtime = discover_app_server_runtime()?;
     for (variable, value) in [
         ("CODEX_CLI_PATH", runtime.codex_cli.clone()),
@@ -117,7 +121,7 @@ fn configure_app_server_runtime(command: &mut Command, host_path: &Path) -> Opti
         return None;
     }
     let directory = create_fallback_app_server_registry(host_path, &runtime).ok()?;
-    command.env("CODEX_HOME", &directory);
+    command.env("CODEX_HOME", directory.path());
     Some(directory)
 }
 
@@ -201,12 +205,10 @@ fn registry_has_entries(path: &Path) -> bool {
 fn create_fallback_app_server_registry(
     host_path: &Path,
     runtime: &AppServerRuntime,
-) -> Result<PathBuf, Box<dyn std::error::Error>> {
-    let directory = env::temp_dir().join(format!(
-        "codex-firefox-bridge-runtime-{}",
-        std::process::id()
-    ));
-    fs::create_dir_all(&directory)?;
+) -> Result<TempDir, Box<dyn std::error::Error>> {
+    let directory = tempfile::Builder::new()
+        .prefix("codex-firefox-bridge-runtime-")
+        .tempdir()?;
     let codex_home = env::var_os("CODEX_HOME")
         .map(PathBuf::from)
         .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join(".codex")))
@@ -224,7 +226,7 @@ fn create_fallback_app_server_registry(
         &updated_at,
     );
     fs::write(
-        directory.join("chrome-native-hosts-v2.json"),
+        directory.path().join("chrome-native-hosts-v2.json"),
         serde_json::to_vec_pretty(&json!({
             "schemaVersion": 2,
             "entries": [entry]
@@ -277,10 +279,38 @@ fn bundled_plugin_version(resources: &Path) -> Option<String> {
 }
 
 fn codex_cli_version(codex_cli: &Path) -> Option<String> {
-    let output = Command::new(codex_cli).arg("--version").output().ok()?;
-    let version = String::from_utf8_lossy(&output.stdout);
-    output.status.success().then(|| {
-        let version = version.trim();
+    codex_cli_version_with_timeout(codex_cli, CODEX_VERSION_TIMEOUT)
+}
+
+fn codex_cli_version_with_timeout(codex_cli: &Path, timeout: Duration) -> Option<String> {
+    let mut stdout = tempfile::tempfile().ok()?;
+    let child_stdout = stdout.try_clone().ok()?;
+    let mut child = Command::new(codex_cli)
+        .arg("--version")
+        .stdout(Stdio::from(child_stdout))
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    let deadline = Instant::now() + timeout;
+    let status = loop {
+        if let Some(status) = child.try_wait().ok()? {
+            break status;
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return None;
+        }
+        thread::sleep(Duration::from_millis(10));
+    };
+    if !status.success() {
+        return None;
+    }
+    stdout.seek(SeekFrom::Start(0)).ok()?;
+    let mut output = String::new();
+    stdout.read_to_string(&mut output).ok()?;
+    Some({
+        let version = output.trim();
         version
             .strip_prefix("codex-cli ")
             .unwrap_or(version)
@@ -836,8 +866,8 @@ mod tests {
 
     #[test]
     fn discovers_a_complete_bundled_app_server_runtime() {
-        let temp =
-            env::temp_dir().join(format!("codex-firefox-runtime-test-{}", std::process::id()));
+        let directory = tempfile::tempdir().unwrap();
+        let temp = directory.path();
         let browser_client =
             temp.join("plugins/openai-bundled/plugins/chrome/scripts/browser-client.mjs");
         for path in [
@@ -851,7 +881,7 @@ mod tests {
         }
 
         assert_eq!(
-            app_server_runtime_from_resources(&temp),
+            app_server_runtime_from_resources(temp),
             Some(AppServerRuntime {
                 codex_cli: temp.join("codex"),
                 node: temp.join("cua_node/bin/node"),
@@ -859,7 +889,6 @@ mod tests {
                 node_repl: temp.join("cua_node/bin/node_repl"),
             })
         );
-        fs::remove_dir_all(temp).unwrap();
     }
 
     #[test]
@@ -903,18 +932,32 @@ mod tests {
 
     #[test]
     fn detects_nonempty_v2_registries() {
-        let path = env::temp_dir().join(format!(
-            "codex-firefox-registry-test-{}.json",
-            std::process::id()
-        ));
-        fs::write(&path, r#"{"schemaVersion":2,"entries":[]}"#).unwrap();
-        assert!(!registry_has_entries(&path));
+        let file = tempfile::NamedTempFile::new().unwrap();
+        let path = file.path();
+        fs::write(path, r#"{"schemaVersion":2,"entries":[]}"#).unwrap();
+        assert!(!registry_has_entries(path));
         fs::write(
-            &path,
+            path,
             r#"{"schemaVersion":2,"entries":[{"entryId":"test"}]}"#,
         )
         .unwrap();
-        assert!(registry_has_entries(&path));
-        fs::remove_file(path).unwrap();
+        assert!(registry_has_entries(path));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn bounds_the_codex_version_probe() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = tempfile::tempdir().unwrap();
+        let script = directory.path().join("slow-codex");
+        fs::write(&script, "#!/bin/sh\nsleep 5\n").unwrap();
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o700)).unwrap();
+        let started = Instant::now();
+        assert_eq!(
+            codex_cli_version_with_timeout(&script, Duration::from_millis(50)),
+            None
+        );
+        assert!(started.elapsed() < Duration::from_secs(1));
     }
 }
