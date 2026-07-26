@@ -4,6 +4,16 @@ This project follows semantic versioning. The Firefox add-on and native companio
 always share one version and are released from a matching `vMAJOR.MINOR.PATCH`
 Git tag.
 
+## 1.4.2 - 2026-07-25
+
+- Fixed Firefox and Zen sidebar-open tracking when the sidebar is opened from
+  the browser's native **View > Sidebar** UI.
+- Made a verified extension-sidepanel startup request authoritative for its
+  current window, so the local app server starts without requiring a synthetic
+  Chrome side-panel event.
+- Added Editing Assets context-menu actions for saving supported media into the
+  configured asset-library folders.
+
 ## 1.4.0 - 2026-07-23
 
 - Added `codex-firefox-bridge` as a terminal-friendly npm installer with

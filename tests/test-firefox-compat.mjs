@@ -54,6 +54,10 @@ const browser = {
       async get(key) { return { [key]: storedValues[key] }; },
       async set(values) { Object.assign(storedValues, values); },
     },
+    session: {
+      async get(key) { return { [key]: storedValues[key] }; },
+      async set(values) { Object.assign(storedValues, values); },
+    },
   },
   tabs: {
     onUpdated: new EventMock(), onRemoved: new EventMock(),
@@ -108,6 +112,38 @@ const context = vm.createContext({
 new vm.Script(source, { filename: "firefox-compat.js" }).runInContext(context);
 const compat = context.__chatgptFirefoxCompat;
 assert.ok(compat?.debugger, "Compatibility debugger was not installed.");
+
+const sidePanelOpenEvents = [];
+const sidePanelEnsureResponses = [];
+let packagedMessageCalls = 0;
+compat.sidePanel.onOpened.addListener((details) => sidePanelOpenEvents.push(details));
+context.chrome.runtime.onMessage.addListener((_message, _sender, sendResponse) => {
+  packagedMessageCalls += 1;
+  sendResponse({ ok: true });
+  return true;
+});
+const packagedMessageListener = browser.runtime.onMessage.listeners.at(-1);
+const keepsChannelOpen = packagedMessageListener(
+  { type: "ensure_codex_app_server", windowId: 10 },
+  { url: "moz-extension://test/codex-sidepanel/index.html" },
+  (response) => sidePanelEnsureResponses.push(response),
+);
+assert.equal(keepsChannelOpen, true, "Authoritative sidebar startup must keep the async response channel open.");
+await new Promise((resolve) => setTimeout(resolve, 0));
+assert.equal(packagedMessageCalls, 1, "The packaged message handler must run after sidebar state is repaired.");
+assert.equal(JSON.stringify(storedValues.codexSidePanelOpenWindowIds), "[10]", "A native Firefox/Zen sidebar open must be persisted.");
+assert.equal(sidePanelOpenEvents.length, 1, "A native sidebar startup must synthesize sidePanel.onOpened.");
+assert.equal(sidePanelOpenEvents[0].windowId, 10);
+assert.deepEqual(sidePanelEnsureResponses, [{ ok: true }]);
+
+packagedMessageListener(
+  { type: "ensure_codex_app_server", windowId: 11 },
+  { url: "https://example.test/not-the-extension-sidebar" },
+  () => {},
+);
+assert.equal(packagedMessageCalls, 2, "Non-sidebar messages must still reach the packaged handler.");
+assert.equal(JSON.stringify(storedValues.codexSidePanelOpenWindowIds), "[10]", "Untrusted senders must not alter sidebar state.");
+assert.equal(sidePanelOpenEvents.length, 1, "Untrusted senders must not synthesize sidebar events.");
 
 context.chrome.runtime.connectNative("com.openai.codexextension");
 nativePort.onDisconnect.emit();
@@ -177,4 +213,4 @@ const unpausedResponse = beforeRequest({ requestId: "req-3", tabId: 1, frameId: 
 assert.equal(JSON.stringify(unpausedResponse), "{}", "Empty Fetch patterns must clear interception instead of pausing every request.");
 assert.equal(events.filter((event) => event.method === "Fetch.requestPaused").length, pauseCount);
 
-console.log(JSON.stringify({ ok: true, frameTree: true, childExecution: true, keyboardSyntax: true, liveNetworkEvents: true, responseBody: true, fetchInterception: true, fetchEmptyPatternClear: true }, null, 2));
+console.log(JSON.stringify({ ok: true, nativeSidebarTracking: true, frameTree: true, childExecution: true, keyboardSyntax: true, liveNetworkEvents: true, responseBody: true, fetchInterception: true, fetchEmptyPatternClear: true }, null, 2));

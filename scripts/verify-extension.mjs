@@ -24,7 +24,9 @@ assert(manifest.manifest_version === 3, "The port must remain a Manifest V3 exte
 assert(manifest.browser_specific_settings?.gecko?.id === "codex-computer-use-firefox-zen@sunkenintime", "Unexpected Gecko extension ID.");
 assert(manifest.sidebar_action?.default_panel === "codex-sidepanel/index.html", "The Firefox sidebar is not wired to the ChatGPT panel.");
 assert(manifest.background?.scripts?.[0] === "firefox-compat.js", "The compatibility layer must load before the packaged background bundle.");
-assert(manifest.background?.scripts?.[1] === "background.js", "The packaged OpenAI background bundle is missing.");
+assert(manifest.background?.scripts?.[1] === "editing-assets.js", "The editing-assets context-menu bridge is missing.");
+assert(manifest.background?.scripts?.[2] === "background.js", "The packaged OpenAI background bundle is missing.");
+assert(manifest.permissions.includes("contextMenus"), "The Editing Assets context menus require the contextMenus permission.");
 assert(!manifest.optional_permissions?.includes("userScripts"), "The publication build must not request the user-script-manager-only permission.");
 for (const permission of ["browsingData", "webNavigation", "webRequest", "webRequestBlocking", "webRequestFilterResponse"]) {
   assert(manifest.permissions.includes(permission), `Firefox compatibility permission is missing: ${permission}`);
@@ -132,6 +134,12 @@ const nativeHostSource = read("native-host/src/main.rs");
 assert(nativeHostSource.includes("hehggadaopoacecdllhhajmbjkdcmajg"), "The native adapter is not pinned to the official OpenAI extension origin.");
 assert(nativeHostSource.includes("DOM.setFileInputFiles"), "The native adapter does not bridge local file uploads.");
 assert(nativeHostSource.includes("target_os = \"macos\""), "The native adapter does not include macOS host discovery.");
+
+const editingAssetsSource = read("extension/editing-assets.js");
+new vm.Script(editingAssetsSource, { filename: "editing-assets.js" });
+for (const title of ["Save as Meme", "Save as Soundboard", "Save as Polish SFX", "Save as Logo", "Save to Inbox"]) {
+  assert(editingAssetsSource.includes(title), `Missing editing asset action: ${title}`);
+}
 
 for (const fixture of ["browser-control.html", "frame-child.html", "frame-grandchild.html", "asset.svg", "upload.txt"]) {
   assert(fs.existsSync(path.join(root, "tests", "fixtures", fixture)), `Missing browser-control fixture: ${fixture}`);

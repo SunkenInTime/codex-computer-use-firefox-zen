@@ -149,17 +149,79 @@
     });
   }
 
+  const sidePanelOpened = new CompatEvent();
+  const sidePanelClosed = new CompatEvent();
+  const runtimeMessageListenerWrappers = new WeakMap();
+
+  function isAuthoritativeSidePanelEnsure(message, sender) {
+    return (
+      message?.type === "ensure_codex_app_server" &&
+      Number.isSafeInteger(message.windowId) &&
+      message.windowId >= 0 &&
+      sender?.tab == null &&
+      sender?.url === firefox.runtime.getURL("codex-sidepanel/index.html")
+    );
+  }
+
+  async function recordNativeSidePanelOpen(windowId) {
+    const storageKey = "codexSidePanelOpenWindowIds";
+    const stored = await firefox.storage.session.get(storageKey);
+    const windowIds = new Set(
+      Array.isArray(stored[storageKey])
+        ? stored[storageKey].filter((id) => Number.isSafeInteger(id))
+        : [],
+    );
+    windowIds.add(windowId);
+    await firefox.storage.session.set({ [storageKey]: [...windowIds] });
+    sidePanelOpened.emit({ windowId });
+  }
+
+  const runtimeOnMessageCompat = {
+    addListener(listener) {
+      const wrapped = (message, sender, sendResponse) => {
+        if (!isAuthoritativeSidePanelEnsure(message, sender)) {
+          return listener(message, sender, sendResponse);
+        }
+
+        // Firefox and Zen do not expose an event for a sidebar opened through
+        // their native View > Sidebar UI. The sidebar page itself is therefore
+        // authoritative for this request. Record it before the packaged
+        // background handler reloads the persisted per-window open state.
+        recordNativeSidePanelOpen(message.windowId)
+          .catch(() => {
+            // Still notify the in-memory listener if session storage failed.
+            sidePanelOpened.emit({ windowId: message.windowId });
+          })
+          .then(() => listener(message, sender, sendResponse));
+        return true;
+      };
+      runtimeMessageListenerWrappers.set(listener, wrapped);
+      firefox.runtime.onMessage.addListener(wrapped);
+    },
+    removeListener(listener) {
+      const wrapped = runtimeMessageListenerWrappers.get(listener);
+      if (wrapped != null) {
+        firefox.runtime.onMessage.removeListener(wrapped);
+        runtimeMessageListenerWrappers.delete(listener);
+      }
+    },
+    hasListener(listener) {
+      const wrapped = runtimeMessageListenerWrappers.get(listener);
+      return wrapped != null && firefox.runtime.onMessage.hasListener(wrapped);
+    },
+  };
+
   const runtimeCompat = new Proxy(firefox.runtime, {
     get(target, property) {
       if (property === "connectNative") {
         return (application) => createNativePortProxy(target.connectNative(application));
       }
+      if (property === "onMessage") {
+        return runtimeOnMessageCompat;
+      }
       return bindValue(target, property);
     },
   });
-
-  const sidePanelOpened = new CompatEvent();
-  const sidePanelClosed = new CompatEvent();
 
   const sidePanelCompat = {
     onOpened: sidePanelOpened,
