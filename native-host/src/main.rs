@@ -10,10 +10,21 @@ use std::process::{ChildStderr, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::thread;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 const HOST_NAME: &str = "com.openai.codexextension";
 const OFFICIAL_CHROME_ORIGIN: &str = "chrome-extension://hehggadaopoacecdllhhajmbjkdcmajg/";
+const OFFICIAL_CHROME_EXTENSION_ID: &str = "hehggadaopoacecdllhhajmbjkdcmajg";
+const FIREFOX_EXTENSION_ID: &str = "codex-computer-use-firefox-zen@sunkenintime";
 const MAX_NATIVE_MESSAGE_BYTES: usize = 1024 * 1024 * 1024;
+
+#[derive(Debug, PartialEq)]
+struct AppServerRuntime {
+    codex_cli: PathBuf,
+    node: PathBuf,
+    browser_client: PathBuf,
+    node_repl: PathBuf,
+}
 
 fn main() {
     let argument = env::args().nth(1);
@@ -49,6 +60,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let host_path = discover_original_host()?;
     let mut command = Command::new(&host_path);
+    let fallback_registry = configure_app_server_runtime(&mut command, &host_path);
     command
         .arg(OFFICIAL_CHROME_ORIGIN)
         .current_dir(host_path.parent().unwrap_or_else(|| Path::new(".")))
@@ -82,13 +94,275 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let _ = output_thread.join();
     let _ = error_thread.join();
     drop(input_thread);
+    if let Some(directory) = fallback_registry {
+        let _ = fs::remove_dir_all(directory);
+    }
     std::process::exit(status.code().unwrap_or(1));
 }
 
-fn forward_stdin(mut output: ChildStdin) {
-    if let Err(error) = io::copy(&mut io::stdin().lock(), &mut output) {
-        eprintln!("[codex-firefox-bridge] stdin forwarding failed: {error}");
+fn configure_app_server_runtime(command: &mut Command, host_path: &Path) -> Option<PathBuf> {
+    let runtime = discover_app_server_runtime()?;
+    for (variable, value) in [
+        ("CODEX_CLI_PATH", runtime.codex_cli.clone()),
+        ("CODEX_BROWSER_USE_NODE_PATH", runtime.node.clone()),
+        ("CODEX_BROWSER_CLIENT_PATH", runtime.browser_client.clone()),
+        ("CODEX_NODE_REPL_PATH", runtime.node_repl.clone()),
+    ] {
+        if env::var_os(variable).is_none() {
+            command.env(variable, value);
+        }
     }
+
+    if has_registered_app_server() {
+        return None;
+    }
+    let directory = create_fallback_app_server_registry(host_path, &runtime).ok()?;
+    command.env("CODEX_HOME", &directory);
+    Some(directory)
+}
+
+fn discover_app_server_runtime() -> Option<AppServerRuntime> {
+    app_server_resource_candidates()
+        .into_iter()
+        .find_map(|resources| app_server_runtime_from_resources(&resources))
+}
+
+fn app_server_resource_candidates() -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+    if let Some(resources) = env::var_os("CODEX_FIREFOX_CHATGPT_RESOURCES") {
+        candidates.push(PathBuf::from(resources));
+    }
+    if cfg!(target_os = "macos") {
+        candidates.push(PathBuf::from(
+            "/Applications/ChatGPT.app/Contents/Resources",
+        ));
+        if let Some(home) = env::var_os("HOME").map(PathBuf::from) {
+            candidates.push(home.join("Applications/ChatGPT.app/Contents/Resources"));
+        }
+    }
+    candidates
+}
+
+fn app_server_runtime_from_resources(resources: &Path) -> Option<AppServerRuntime> {
+    let runtime = AppServerRuntime {
+        codex_cli: resources.join("codex"),
+        node: resources.join("cua_node/bin/node"),
+        browser_client: resources
+            .join("plugins/openai-bundled/plugins/chrome/scripts/browser-client.mjs"),
+        node_repl: resources.join("cua_node/bin/node_repl"),
+    };
+    [
+        &runtime.codex_cli,
+        &runtime.node,
+        &runtime.browser_client,
+        &runtime.node_repl,
+    ]
+    .iter()
+    .all(|path| path.is_file())
+    .then_some(runtime)
+}
+
+fn has_registered_app_server() -> bool {
+    app_server_registry_candidates()
+        .iter()
+        .any(|path| registry_has_entries(path))
+}
+
+fn app_server_registry_candidates() -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+    if let Some(codex_home) = env::var_os("CODEX_HOME").map(PathBuf::from) {
+        candidates.push(codex_home.join("chrome-native-hosts-v2.json"));
+    }
+    if let Some(home) = env::var_os("HOME").map(PathBuf::from) {
+        candidates.push(home.join(".codex/chrome-native-hosts-v2.json"));
+        if cfg!(target_os = "macos") {
+            candidates.push(
+                home.join("Library/Application Support/OpenAI/Codex")
+                    .join("chrome-native-hosts-v2.json"),
+            );
+        }
+    }
+    candidates
+}
+
+fn registry_has_entries(path: &Path) -> bool {
+    let Ok(bytes) = fs::read(path) else {
+        return false;
+    };
+    let Ok(value) = serde_json::from_slice::<Value>(&bytes) else {
+        return false;
+    };
+    value
+        .get("entries")
+        .and_then(Value::as_array)
+        .is_some_and(|entries| !entries.is_empty())
+}
+
+fn create_fallback_app_server_registry(
+    host_path: &Path,
+    runtime: &AppServerRuntime,
+) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    let directory = env::temp_dir().join(format!(
+        "codex-firefox-bridge-runtime-{}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&directory)?;
+    let codex_home = env::var_os("CODEX_HOME")
+        .map(PathBuf::from)
+        .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join(".codex")))
+        .ok_or("Codex home directory is unavailable")?;
+    let resources = runtime.codex_cli.parent().ok_or("Invalid Codex CLI path")?;
+    let app_version = bundled_plugin_version(resources).unwrap_or_else(|| "0.0.0".into());
+    let cli_version = codex_cli_version(&runtime.codex_cli).unwrap_or_else(|| "0.0.0".into());
+    let updated_at = current_timestamp();
+    let entry = fallback_registry_entry(
+        host_path,
+        runtime,
+        &codex_home,
+        &app_version,
+        &cli_version,
+        &updated_at,
+    );
+    fs::write(
+        directory.join("chrome-native-hosts-v2.json"),
+        serde_json::to_vec_pretty(&json!({
+            "schemaVersion": 2,
+            "entries": [entry]
+        }))?,
+    )?;
+    Ok(directory)
+}
+
+fn fallback_registry_entry(
+    host_path: &Path,
+    runtime: &AppServerRuntime,
+    codex_home: &Path,
+    app_version: &str,
+    cli_version: &str,
+    updated_at: &str,
+) -> Value {
+    let resources = runtime.codex_cli.parent().unwrap_or_else(|| Path::new("."));
+    json!({
+        "schemaVersion": 2,
+        "appServerProtocolVersion": 2,
+        "appVersion": app_version,
+        "channel": "prod",
+        "cliVersion": cli_version,
+        "entryId": "codex-firefox-bridge-current-chatgpt",
+        "extensionBuildChannels": ["prod"],
+        "extensionIds": [OFFICIAL_CHROME_EXTENSION_ID, FIREFOX_EXTENSION_ID],
+        "installId": "codex-firefox-bridge-current-chatgpt",
+        "nativeHostNames": [HOST_NAME],
+        "nativeHostProtocolVersion": 2,
+        "nativeHostVersion": "0.1.0",
+        "paths": {
+            "browserClientPath": runtime.browser_client,
+            "codexCliPath": runtime.codex_cli,
+            "codexHome": codex_home,
+            "extensionHostPath": host_path,
+            "nodePath": runtime.node,
+            "nodeReplPath": runtime.node_repl,
+            "resourcesPath": resources
+        },
+        "proxyHost": "127.0.0.1",
+        "proxyPort": 0,
+        "updatedAt": updated_at
+    })
+}
+
+fn bundled_plugin_version(resources: &Path) -> Option<String> {
+    let path = resources.join("plugins/openai-bundled/plugins/chrome/.codex-plugin/plugin.json");
+    let value: Value = serde_json::from_slice(&fs::read(path).ok()?).ok()?;
+    value.get("version")?.as_str().map(ToOwned::to_owned)
+}
+
+fn codex_cli_version(codex_cli: &Path) -> Option<String> {
+    let output = Command::new(codex_cli).arg("--version").output().ok()?;
+    let version = String::from_utf8_lossy(&output.stdout);
+    output.status.success().then(|| {
+        let version = version.trim();
+        version
+            .strip_prefix("codex-cli ")
+            .unwrap_or(version)
+            .to_owned()
+    })
+}
+
+fn current_timestamp() -> String {
+    let seconds = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0);
+    format!("unix-{seconds}")
+}
+
+fn forward_stdin(mut output: ChildStdin) {
+    let mut input = io::stdin().lock();
+    loop {
+        let mut header = [0_u8; 4];
+        match read_exact_or_eof(&mut input, &mut header) {
+            Ok(false) => return,
+            Ok(true) => {}
+            Err(error) => {
+                eprintln!("[codex-firefox-bridge] native input header read failed: {error}");
+                return;
+            }
+        }
+        let length = u32::from_le_bytes(header) as usize;
+        if length > MAX_NATIVE_MESSAGE_BYTES {
+            eprintln!("[codex-firefox-bridge] native input message is too large: {length}");
+            return;
+        }
+        let mut payload = vec![0_u8; length];
+        if let Err(error) = input.read_exact(&mut payload) {
+            eprintln!("[codex-firefox-bridge] native input payload read failed: {error}");
+            return;
+        }
+        let rewritten = rewrite_native_request(payload);
+        let rewritten_header = (rewritten.len() as u32).to_le_bytes();
+        if output
+            .write_all(&rewritten_header)
+            .and_then(|_| output.write_all(&rewritten))
+            .and_then(|_| output.flush())
+            .is_err()
+        {
+            return;
+        }
+    }
+}
+
+fn rewrite_native_request(payload: Vec<u8>) -> Vec<u8> {
+    let Ok(mut value) = serde_json::from_slice::<Value>(&payload) else {
+        return payload;
+    };
+    if !rewrite_firefox_extension_id(&mut value) {
+        return payload;
+    }
+    serde_json::to_vec(&value).unwrap_or(payload)
+}
+
+fn rewrite_firefox_extension_id(value: &mut Value) -> bool {
+    let mut changed = false;
+    match value {
+        Value::String(text) => {
+            if text == FIREFOX_EXTENSION_ID {
+                *text = OFFICIAL_CHROME_EXTENSION_ID.into();
+                changed = true;
+            }
+        }
+        Value::Object(object) => {
+            for child in object.values_mut() {
+                changed |= rewrite_firefox_extension_id(child);
+            }
+        }
+        Value::Array(array) => {
+            for child in array {
+                changed |= rewrite_firefox_extension_id(child);
+            }
+        }
+        _ => {}
+    }
+    changed
 }
 
 fn forward_stderr(mut input: ChildStderr) {
@@ -350,7 +624,10 @@ fn rewrite_websocket_request(request: &str, upstream_port: u16) -> String {
         .map(|line| {
             let lower = line.to_ascii_lowercase();
             if lower.starts_with("origin:") {
-                format!("Origin: {OFFICIAL_CHROME_ORIGIN}\r\n")
+                format!(
+                    "Origin: {}\r\n",
+                    OFFICIAL_CHROME_ORIGIN.trim_end_matches('/')
+                )
             } else if lower.starts_with("host:") {
                 format!("Host: 127.0.0.1:{upstream_port}\r\n")
             } else {
@@ -520,11 +797,32 @@ mod tests {
     }
 
     #[test]
+    fn presents_firefox_requests_as_the_official_chrome_extension() {
+        let payload = serde_json::to_vec(&json!({
+            "jsonrpc": "2.0",
+            "method": "codexRuntime/ensure",
+            "params": {
+                "constraints": {
+                    "extensionId": FIREFOX_EXTENSION_ID
+                }
+            }
+        }))
+        .unwrap();
+        let rewritten: Value = serde_json::from_slice(&rewrite_native_request(payload)).unwrap();
+        assert_eq!(
+            rewritten["params"]["constraints"]["extensionId"],
+            OFFICIAL_CHROME_EXTENSION_ID
+        );
+    }
+
+    #[test]
     fn rewrites_websocket_origin_and_host() {
         let request = "GET / HTTP/1.1\r\nHost: 127.0.0.1:1\r\nOrigin: moz-extension://abc\r\n\r\n";
         let rewritten = rewrite_websocket_request(request, 45678);
         assert!(rewritten.contains("Host: 127.0.0.1:45678\r\n"));
-        assert!(rewritten.contains(&format!("Origin: {OFFICIAL_CHROME_ORIGIN}\r\n")));
+        assert!(
+            rewritten.contains("Origin: chrome-extension://hehggadaopoacecdllhhajmbjkdcmajg\r\n")
+        );
     }
 
     #[test]
@@ -534,5 +832,89 @@ mod tests {
             paths[0],
             Path::new("/Users/test/.codex/plugins/cache/openai-bundled/chrome/latest/extension-host/macos/arm64/ChatGPT for Chrome")
         );
+    }
+
+    #[test]
+    fn discovers_a_complete_bundled_app_server_runtime() {
+        let temp =
+            env::temp_dir().join(format!("codex-firefox-runtime-test-{}", std::process::id()));
+        let browser_client =
+            temp.join("plugins/openai-bundled/plugins/chrome/scripts/browser-client.mjs");
+        for path in [
+            temp.join("codex"),
+            temp.join("cua_node/bin/node"),
+            temp.join("cua_node/bin/node_repl"),
+            browser_client.clone(),
+        ] {
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, "").unwrap();
+        }
+
+        assert_eq!(
+            app_server_runtime_from_resources(&temp),
+            Some(AppServerRuntime {
+                codex_cli: temp.join("codex"),
+                node: temp.join("cua_node/bin/node"),
+                browser_client,
+                node_repl: temp.join("cua_node/bin/node_repl"),
+            })
+        );
+        fs::remove_dir_all(temp).unwrap();
+    }
+
+    #[test]
+    fn rejects_an_incomplete_bundled_app_server_runtime() {
+        let missing = env::temp_dir().join("codex-firefox-missing-runtime");
+        assert_eq!(app_server_runtime_from_resources(&missing), None);
+    }
+
+    #[test]
+    fn creates_a_v2_fallback_registry_entry_for_firefox() {
+        let runtime = AppServerRuntime {
+            codex_cli: PathBuf::from("/Applications/ChatGPT.app/Contents/Resources/codex"),
+            node: PathBuf::from("/Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node"),
+            browser_client: PathBuf::from(
+                "/Applications/ChatGPT.app/Contents/Resources/plugins/openai-bundled/plugins/chrome/scripts/browser-client.mjs",
+            ),
+            node_repl: PathBuf::from(
+                "/Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl",
+            ),
+        };
+        let entry = fallback_registry_entry(
+            Path::new("/native/ChatGPT for Chrome"),
+            &runtime,
+            Path::new("/Users/test/.codex"),
+            "26.721.41059",
+            "0.146.0-alpha.3.1",
+            "test-time",
+        );
+        assert_eq!(entry["schemaVersion"], 2);
+        assert_eq!(entry["appServerProtocolVersion"], 2);
+        assert_eq!(entry["extensionIds"][1], FIREFOX_EXTENSION_ID);
+        assert_eq!(
+            entry["paths"]["codexCliPath"].as_str(),
+            runtime.codex_cli.to_str()
+        );
+        assert_eq!(
+            entry["paths"]["extensionHostPath"],
+            "/native/ChatGPT for Chrome"
+        );
+    }
+
+    #[test]
+    fn detects_nonempty_v2_registries() {
+        let path = env::temp_dir().join(format!(
+            "codex-firefox-registry-test-{}.json",
+            std::process::id()
+        ));
+        fs::write(&path, r#"{"schemaVersion":2,"entries":[]}"#).unwrap();
+        assert!(!registry_has_entries(&path));
+        fs::write(
+            &path,
+            r#"{"schemaVersion":2,"entries":[{"entryId":"test"}]}"#,
+        )
+        .unwrap();
+        assert!(registry_has_entries(&path));
+        fs::remove_file(path).unwrap();
     }
 }

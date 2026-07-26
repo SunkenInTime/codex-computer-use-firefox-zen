@@ -9,6 +9,7 @@ manifest_dir="$HOME/Library/Application Support/Mozilla/NativeMessagingHosts"
 cargo build --release --locked --manifest-path "$root/native-host/Cargo.toml"
 mkdir -p "$install_dir" "$manifest_dir"
 cp "$root/native-host/target/release/codex-firefox-bridge" "$install_dir/codex-firefox-bridge"
+codesign --force --sign - "$install_dir/codex-firefox-bridge"
 node - "$root/installer/macos/com.openai.codexextension.json" \
   "$manifest_dir/com.openai.codexextension.json" \
   "$install_dir/codex-firefox-bridge" <<'NODE'
