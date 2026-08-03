@@ -43,8 +43,8 @@ See [PORT_STATUS.md](PORT_STATUS.md) for the test evidence and the remaining low
 
 ## Install
 
-The Firefox add-on and its companion bridge are versioned together. Release
-`1.4.0` provides three supported ways to install the companion:
+The Firefox add-on and its companion bridge are versioned together. There are
+three supported ways to install the companion:
 
 - Windows: run `codex-firefox-bridge-<version>-windows-x64-setup.exe`. It installs
   per-user and does not require administrator access.
@@ -53,12 +53,12 @@ The Firefox add-on and its companion bridge are versioned together. Release
 - npm (Windows or macOS):
 
   ```sh
-  npx --yes codex-firefox-bridge@1.4.0 install
+  npx --yes codex-firefox-bridge@latest install
   ```
 
   This is a persistent per-user installation, not a bridge that only lives for
   the duration of `npx`. Inspect it later with
-  `npx --yes codex-firefox-bridge@1.4.0 doctor`, or remove it with the
+  `npx --yes codex-firefox-bridge@latest doctor`, or remove it with the
   corresponding `uninstall` command.
 
 Install the companion once, then install the matching signed Firefox add-on.
@@ -136,8 +136,10 @@ Pushing a semantic-version tag such as `v1.4.0` runs the release workflow. It
 builds and tests the extension, a Windows x64 installer, and a universal macOS
 package; verifies that the tag, extension, npm package, and companion versions
 match; generates checksums; and attaches the installers, raw bridge binaries,
-and npm tarball to the GitHub release. If `NPM_TOKEN` is configured, it also
-publishes the npm package with provenance.
+and npm tarball to the GitHub release. It publishes the npm package with
+provenance, then performs a clean installation of that exact public version in
+an isolated macOS home directory. Submit the matching signed Firefox add-on to
+AMO only after that release smoke test passes.
 Prepare the next version with `npm run version:set -- MAJOR.MINOR.PATCH`; this
 updates every version-bearing file together. Production releases should configure
 the signing secrets described in `.github/workflows/release.yml`.
