@@ -4,6 +4,17 @@ This project follows semantic versioning. The Firefox add-on and native companio
 always share one version and are released from a matching `vMAJOR.MINOR.PATCH`
 Git tag.
 
+## 1.4.3 - 2026-08-02
+
+- Published the Firefox/Zen sidebar-open repair together with its matching
+  native companion, npm installer, and platform installers.
+- Fixed current Codex app-server startup by providing the bundled runtime paths
+  and a temporary fallback v2 native-host registration when necessary.
+- Rewrote Firefox extension identifiers and WebSocket handshake metadata at the
+  native-host boundary so the official Codex host accepts the delegated session.
+- Added a post-release clean-install smoke test that verifies the public assets
+  and installs the exact released npm companion in an isolated home directory.
+
 ## 1.4.2 - 2026-07-25
 
 - Fixed Firefox and Zen sidebar-open tracking when the sidebar is opened from
