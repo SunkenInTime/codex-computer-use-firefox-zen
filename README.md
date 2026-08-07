@@ -1,6 +1,6 @@
 # Codex Computer Use for Zen & Fox
 
-This is a Firefox-compatible port of OpenAI's official browser extension (`hehggadaopoacecdllhhajmbjkdcmajg`), based on packaged extension version `1.2.27203.26576`. Zen is supported as a Firefox browser and was the primary live-test target.
+This is a Firefox-compatible port of OpenAI's official browser extension (`hehggadaopoacecdllhhajmbjkdcmajg`), based on packaged extension version `1.2.27236.6274` (build `ad34341c30168f421705cd15f1633ebe6cea7849`). Zen is supported as a Firefox browser and is the primary live-test target.
 
 This is an independent compatibility project. It is not an official OpenAI, Mozilla, or Zen Browser release and is not endorsed by those organizations. You need an existing ChatGPT/Codex installation and account; this repository does not include or bypass account access.
 
@@ -19,6 +19,23 @@ The original OpenAI sidebar and background application are retained. The compati
 ## Verified parity
 
 The port has been exercised against the real signed-in OpenAI sidebar in Zen, not only against mocks.
+
+The inherited July 27-31 ChatGPT extension features are also present in the
+Firefox/Zen build. The packaged application code is byte-for-byte identical to
+the current `1.2.27236.6274` extension installed in Helium for these paths; the
+port changes only the browser compatibility and packaging layers.
+
+| ChatGPT browser feature | Firefox/Zen support |
+| --- | --- |
+| Mention any open tab as chat context | Pass — the `chatgpt.com` bridge and filtered tab provider are retained |
+| Send highlighted page text to ChatGPT | Pass — selection text is forwarded into the sidebar invocation |
+| Right-click a page and choose **Ask ChatGPT** | Pass — coexists with the port's custom Editing Assets menus |
+| Ask about YouTube videos with timestamped captions | Pass — caption retrieval, transcript formatting, and timestamp seeking are retained |
+| Find relevant browser-history pages | Pass — Firefox `history.search` is wired through the inherited browser client; ChatGPT owns the per-request approval UI |
+| Continue chats between the browser and desktop app | Pass — shared thread routes and the `codex://threads/` desktop handoff are retained |
+
+`tests/test-chatgpt-feature-parity.mjs` guards these inherited surfaces against
+being dropped during a future upstream refresh.
 
 | Capability | Result |
 | --- | --- |

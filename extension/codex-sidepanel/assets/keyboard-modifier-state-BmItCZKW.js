@@ -1,0 +1,1 @@
+import{Pt as e,Tt as t,_t as n}from"./reduced-motion-preference-DWV8MCjl.js";var r=e(n,!1),i=e(n,!1),a=e(n,!1),o=e(n,!1),s=t(n,({get:e})=>{let t=e(i),n=e(a);return t||n});function c(e){e.set(r,!1),e.set(i,!1),e.set(a,!1),e.set(o,!1)}function l(e,{altKey:t,ctrlKey:n,metaKey:s,shiftKey:c}){e.set(r,t),e.set(i,n),e.set(a,s),e.set(o,c)}export{l as i,r as n,s as r,c as t};

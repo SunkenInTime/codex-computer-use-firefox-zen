@@ -13,13 +13,19 @@ class EventMock {
   emit(...args) { for (const listener of [...this.listeners]) listener(...args); }
 }
 
-const createdMenus = [];
+const createdMenus = [{ id: "ask-chatgpt", title: "Ask ChatGPT", contexts: ["page", "selection"] }];
+const removedMenus = [];
 const downloads = [];
 const notifications = [];
 const browser = {
   contextMenus: {
     onClicked: new EventMock(),
-    async removeAll() { createdMenus.length = 0; },
+    async remove(id) {
+      removedMenus.push(id);
+      const index = createdMenus.findIndex((menu) => menu.id === id);
+      if (index < 0) throw new Error("Cannot find menu item");
+      createdMenus.splice(index, 1);
+    },
     async create(details) { createdMenus.push(details); return details.id; },
   },
   runtime: {
@@ -43,13 +49,21 @@ await new Promise((resolve) => setTimeout(resolve, 0));
 const editingAssets = context.__editingAssets;
 assert.ok(editingAssets, "Editing Assets helpers were not exported.");
 assert.deepEqual(createdMenus.map((menu) => menu.title), [
+  "Ask ChatGPT",
   "Save as Meme",
   "Save as Soundboard",
   "Save as Polish SFX",
   "Save as Logo",
   "Save to Inbox",
 ]);
-assert.ok(createdMenus.every((menu) => JSON.stringify(menu.contexts) === JSON.stringify(["image", "video"])));
+assert.deepEqual(removedMenus, Object.keys(editingAssets.ACTIONS).map((id) => `editing-assets-${id}`));
+assert.ok(createdMenus.slice(1).every((menu) => JSON.stringify(menu.contexts) === JSON.stringify(["image", "video"])));
+assert.equal(createdMenus[0].title, "Ask ChatGPT", "Refreshing custom menus must preserve the upstream ChatGPT menu.");
+
+browser.runtime.onStartup.emit();
+await new Promise((resolve) => setTimeout(resolve, 0));
+assert.equal(createdMenus.filter((menu) => menu.title === "Ask ChatGPT").length, 1, "Startup must preserve Ask ChatGPT.");
+assert.equal(createdMenus.length, 6, "Startup must replace, not duplicate, Editing Assets menus.");
 
 const info = {
   srcUrl: "https://cdn.example.test/clip.webm?download=1",
@@ -78,4 +92,4 @@ assert.equal(downloads.length, 1, "Unsupported sources must not start a download
 assert.equal(notifications.length, 1);
 assert.match(notifications[0].message, /cannot be downloaded directly/u);
 
-console.log(JSON.stringify({ ok: true, menus: createdMenus.length, downloadPath: downloads[0].filename, unsupportedSourceNotDownloaded: true }, null, 2));
+console.log(JSON.stringify({ ok: true, menus: createdMenus.length, askChatGPTPreserved: true, downloadPath: downloads[0].filename, unsupportedSourceNotDownloaded: true }, null, 2));

@@ -2,6 +2,15 @@
 
 Live verification was completed on July 15, 2026 with Zen 1.21.6b, Gecko/Firefox 152.0.5, and the packaged OpenAI extension version `1.2.27203.26575`. All work described here stays in the normal WebExtension tier: no browser flags, patched Zen build, privileged experiment API, or external automation daemon is required.
 
+On August 6, 2026, the port was resynced to OpenAI extension
+`1.2.27236.6274` and compared with the current copy installed in Helium. The
+inherited background bundle, ChatGPT website bridge, sidebar assets, and
+YouTube transcript implementation are byte-for-byte identical. Static
+regression coverage confirms open-tab mentions, highlighted-text and page
+context handoff, the **Ask ChatGPT** menu, timestamped YouTube captions,
+browser-history search, and browser/desktop thread handoff. The port's custom
+Editing Assets menu refresh was also changed to preserve upstream menu items.
+
 ## End-to-end test evidence
 
 The extension was loaded temporarily from `extension/manifest.json`, its optional Firefox permission was enabled, and the machine-local adapter was registered under its fixed Gecko ID. The publication build uses `codex-computer-use-firefox-zen@sunkenintime`; the adapter allowlist is generated from the matching project registration script.
@@ -20,7 +29,7 @@ The extension was loaded temporarily from `extension/manifest.json`, its optiona
 - Translated network events included request, response, and load completion. `Network.getResponseBody` returned the complete 232-byte SVG body. Explicit `Fetch` interception and synthetic fulfillment pass the protocol test, and `Fetch.enable({patterns: []})` correctly clears interception before navigation/reload.
 - `Page.getFrameTree` returned the main document plus child and grandchild, while `DOMSnapshot.captureSnapshot` returned all three documents.
 - Confirm and prompt calls are discoverable through the normal browser dialog API; accepted choices are replayed into the originating control so typical event-driven pages observe the chosen result.
-- Static and native integration tests pass. `web-ext lint` reports 0 errors, 0 notices, and 67 warnings inherited from minified application code or intentional compatibility serialization.
+- Static and native integration tests pass. `web-ext lint` reports 0 errors, 0 notices, and 72 warnings inherited from minified application code, unsupported APIs translated by the compatibility layer, or intentional compatibility serialization.
 
 The reusable fixture is `tests/fixtures/browser-control.html`; `npm test` covers the protocol-level native-message, upload, and WebSocket relay paths.
 

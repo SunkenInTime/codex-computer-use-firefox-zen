@@ -1,0 +1,1 @@
+var e=[.23,1,.32,1],t={duration:300/1e3,ease:[.19,1,.22,1]};export{e as n,t};

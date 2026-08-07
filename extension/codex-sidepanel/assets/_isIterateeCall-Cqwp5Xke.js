@@ -1,0 +1,1 @@
+import{t as e}from"./rolldown-runtime-C_JxhDyB.js";import{Lo as t,Uo as n,cs as r,is as i}from"./index.browser-DtavBX6E.js";var a=e(((e,a)=>{var o=r(),s=t(),c=n(),l=i();function u(e,t,n){if(!l(n))return!1;var r=typeof t;return(r==`number`?s(n)&&c(t,n.length):r==`string`&&t in n)?o(n[t],e):!1}a.exports=u}));export{a as t};

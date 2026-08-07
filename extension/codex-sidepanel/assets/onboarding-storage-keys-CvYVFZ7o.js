@@ -1,0 +1,1 @@
+var e=`last_completed_onboarding`,t=`electron:onboarding-projectless-completed`;export{t as n,e as t};

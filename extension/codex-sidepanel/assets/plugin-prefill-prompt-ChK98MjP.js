@@ -1,0 +1,1 @@
+import{Ao as e,Rl as t}from"./app-server-manager-signals-DL-4UJGg.js";import"./mention-item-QssPHWtI.js";function n(e){return e?.map(e=>e.trim()).find(e=>e.length>0)??null}function r({defaultPrompt:n,pluginDisplayName:r,pluginId:i}){return`${`[@${r}](${t(e(i))})`} ${n?.trim()??``}`}export{n,r as t};

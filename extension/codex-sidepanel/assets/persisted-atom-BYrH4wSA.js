@@ -1,0 +1,1 @@
+import{Lt as e,c as t,p as n}from"./reduced-motion-preference-DWV8MCjl.js";function r(){n()}function i(n,r,i){return e(n,r,t(),i)}export{r as n,i as t};

@@ -27,7 +27,9 @@ const webRequest = {
 };
 const executedTargets = [];
 const executedSources = [];
+const executedFaviconTargets = [];
 const createdTabs = [];
+const fetchedUrls = [];
 const storedValues = {};
 const nativePort = {
   onMessage: new EventMock(),
@@ -61,8 +63,8 @@ const browser = {
   },
   tabs: {
     onUpdated: new EventMock(), onRemoved: new EventMock(),
-    async query() { return [{ id: 1, windowId: 10, url: "https://top.test/", title: "Top", active: true }]; },
-    async get() { return { id: 1, windowId: 10, url: "https://top.test/", title: "Top", active: true }; },
+    async query() { return [{ id: 1, windowId: 10, index: 0, url: "https://top.test/", title: "Top", active: true, favIconUrl: "https://top.test/favicon.ico" }]; },
+    async get() { return { id: 1, windowId: 10, index: 0, url: "https://top.test/", title: "Top", active: true, favIconUrl: "https://top.test/favicon.ico" }; },
     async create(details) { createdTabs.push(details); },
     async update() {}, async remove() {}, async reload() {}, async setZoom() {},
     async captureTab() { return "data:image/png;base64,dGVzdA=="; },
@@ -80,8 +82,16 @@ const browser = {
     async getFrame({ frameId }) { return { frameId, url: frameId === 7 ? "https://child.test/" : "https://top.test/" }; },
   },
   scripting: {
-    async executeScript({ target, args }) {
+    async executeScript({ target, func, args }) {
       executedTargets.push(target);
+      if (args[0] === "https://top.test/favicon.ico" && typeof func === "function") {
+        executedFaviconTargets.push(target);
+        return [{ frameId: 0, result: {
+          bytes: [105, 99, 111, 110],
+          contentType: "image/x-icon",
+          status: 200,
+        } }];
+      }
       const sourceText = args[0];
       executedSources.push(sourceText);
       let value = {};
@@ -107,41 +117,107 @@ const browser = {
 const context = vm.createContext({
   browser, console, URL, URLSearchParams, TextDecoder, TextEncoder, Uint8Array, ArrayBuffer,
   atob, btoa, structuredClone, setTimeout, clearTimeout, queueMicrotask,
+  Response,
+  fetch: async (input) => {
+    fetchedUrls.push(String(input));
+    if (String(input) === "https://top.test/favicon.ico") {
+      throw new TypeError("Blocked by extension connect-src");
+    }
+    return new Response("icon", { status: 200, headers: { "content-type": "image/x-icon" } });
+  },
   performance: { now: () => 100 }, navigator: { userAgent: "Firefox test" },
 });
 new vm.Script(source, { filename: "firefox-compat.js" }).runInContext(context);
 const compat = context.__chatgptFirefoxCompat;
 assert.ok(compat?.debugger, "Compatibility debugger was not installed.");
+assert.equal(
+  (await context.chrome.action.getUserSettings()).isOnToolbar,
+  true,
+  "The current OpenAI background requires a Firefox-safe toolbar settings result.",
+);
+assert.equal(
+  typeof context.chrome.action.onUserSettingsChanged.addListener,
+  "function",
+  "The current OpenAI background requires a Firefox-safe toolbar settings event.",
+);
+
+const faviconResponse = await context.fetch("moz-extension://test/_favicon/?pageUrl=https%3A%2F%2Ftop.test%2F&size=32");
+assert.equal(faviconResponse.ok, true);
+assert.equal(fetchedUrls.at(-1), "https://top.test/favicon.ico", "Chrome's virtual favicon request must resolve through Firefox's tab favicon URL.");
+assert.equal(JSON.stringify(executedFaviconTargets), '[{"tabId":1}]', "A CSP-blocked favicon must be read from the matching Firefox tab.");
+assert.equal(await faviconResponse.text(), "icon");
 
 const sidePanelOpenEvents = [];
 const sidePanelEnsureResponses = [];
+const sidePanelReadyResponses = [];
+const tabMentionResponses = [];
+const packagedMessageSenders = [];
 let packagedMessageCalls = 0;
 compat.sidePanel.onOpened.addListener((details) => sidePanelOpenEvents.push(details));
-context.chrome.runtime.onMessage.addListener((_message, _sender, sendResponse) => {
+context.chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   packagedMessageCalls += 1;
+  packagedMessageSenders.push(sender);
+  if (message.type === "search_browser_tab_mentions") {
+    sendResponse(sender.tab == null
+      ? { ok: true, candidates: [{ id: 1, title: "Top", url: "https://top.test/" }] }
+      : { ok: false, error: "Chrome tab mentions can only be accessed from the Codex side panel or ChatGPT" });
+    return true;
+  }
   sendResponse({ ok: true });
   return true;
 });
 const packagedMessageListener = browser.runtime.onMessage.listeners.at(-1);
+const keepsReadyChannelOpen = packagedMessageListener(
+  { embedded: true, type: "codex_firefox_sidepanel_ready", windowId: 10 },
+  { tab: { id: 1 }, url: "moz-extension://test/codex-sidepanel/index.html" },
+  (response) => sidePanelReadyResponses.push(response),
+);
+assert.equal(keepsReadyChannelOpen, true, "Native Firefox sidebar readiness must keep the async response channel open.");
+await new Promise((resolve) => setTimeout(resolve, 0));
+assert.equal(packagedMessageCalls, 0, "The Firefox-only readiness handshake must not reach the packaged handler.");
+assert.equal(JSON.stringify(sidePanelReadyResponses), '[{"ok":true}]');
+assert.equal(JSON.stringify(storedValues.codexSidePanelOpenWindowIds), "[10]", "Sidebar readiness must be persisted before upstream boot.");
+
+const rejectedReadyResponses = [];
+const rejectedReadyResult = packagedMessageListener(
+  { embedded: false, type: "codex_firefox_sidepanel_ready", windowId: 12 },
+  { tab: { id: 2 }, url: "moz-extension://test/codex-sidepanel/index.html" },
+  (response) => rejectedReadyResponses.push(response),
+);
+assert.equal(rejectedReadyResult, false, "A normal extension tab must not be recorded as an open native sidebar.");
+assert.equal(JSON.stringify(rejectedReadyResponses), '[{"ok":false}]');
+assert.equal(packagedMessageCalls, 0, "Firefox readiness messages must never reach the packaged handler.");
+
+const keepsTabMentionChannelOpen = packagedMessageListener(
+  { type: "search_browser_tab_mentions", query: "top", limit: 10 },
+  { tab: { id: 1 }, url: "moz-extension://test/codex-sidepanel/index.html" },
+  (response) => tabMentionResponses.push(response),
+);
+assert.equal(keepsTabMentionChannelOpen, true, "Native Firefox sidebar tab searches must reach the packaged async handler.");
+assert.equal(packagedMessageCalls, 1);
+assert.equal(packagedMessageSenders.at(-1).tab, undefined, "The official handler must receive the Chrome-equivalent side-panel sender shape.");
+assert.deepEqual(tabMentionResponses, [{ ok: true, candidates: [{ id: 1, title: "Top", url: "https://top.test/" }] }]);
+
 const keepsChannelOpen = packagedMessageListener(
   { type: "ensure_codex_app_server", windowId: 10 },
-  { url: "moz-extension://test/codex-sidepanel/index.html" },
+  { tab: { id: 1 }, url: "moz-extension://test/codex-sidepanel/index.html" },
   (response) => sidePanelEnsureResponses.push(response),
 );
 assert.equal(keepsChannelOpen, true, "Authoritative sidebar startup must keep the async response channel open.");
 await new Promise((resolve) => setTimeout(resolve, 0));
-assert.equal(packagedMessageCalls, 1, "The packaged message handler must run after sidebar state is repaired.");
+assert.equal(packagedMessageCalls, 2, "The packaged message handler must run after sidebar state is repaired.");
 assert.equal(JSON.stringify(storedValues.codexSidePanelOpenWindowIds), "[10]", "A native Firefox/Zen sidebar open must be persisted.");
-assert.equal(sidePanelOpenEvents.length, 1, "A native sidebar startup must synthesize sidePanel.onOpened.");
+assert.equal(sidePanelOpenEvents.length, 1, "Repeated sidebar startup must not re-emit sidePanel.onOpened.");
 assert.equal(sidePanelOpenEvents[0].windowId, 10);
 assert.deepEqual(sidePanelEnsureResponses, [{ ok: true }]);
+assert.equal(packagedMessageSenders.at(-1).tab, undefined, "All trusted native-sidebar requests must use Chrome's tabless sender shape.");
 
 packagedMessageListener(
   { type: "ensure_codex_app_server", windowId: 11 },
   { url: "https://example.test/not-the-extension-sidebar" },
   () => {},
 );
-assert.equal(packagedMessageCalls, 2, "Non-sidebar messages must still reach the packaged handler.");
+assert.equal(packagedMessageCalls, 3, "Non-sidebar messages must still reach the packaged handler.");
 assert.equal(JSON.stringify(storedValues.codexSidePanelOpenWindowIds), "[10]", "Untrusted senders must not alter sidebar state.");
 assert.equal(sidePanelOpenEvents.length, 1, "Untrusted senders must not synthesize sidebar events.");
 
@@ -213,4 +289,4 @@ const unpausedResponse = beforeRequest({ requestId: "req-3", tabId: 1, frameId: 
 assert.equal(JSON.stringify(unpausedResponse), "{}", "Empty Fetch patterns must clear interception instead of pausing every request.");
 assert.equal(events.filter((event) => event.method === "Fetch.requestPaused").length, pauseCount);
 
-console.log(JSON.stringify({ ok: true, nativeSidebarTracking: true, frameTree: true, childExecution: true, keyboardSyntax: true, liveNetworkEvents: true, responseBody: true, fetchInterception: true, fetchEmptyPatternClear: true }, null, 2));
+console.log(JSON.stringify({ ok: true, toolbarSettings: true, nativeSidebarTracking: true, frameTree: true, childExecution: true, keyboardSyntax: true, liveNetworkEvents: true, responseBody: true, fetchInterception: true, fetchEmptyPatternClear: true }, null, 2));

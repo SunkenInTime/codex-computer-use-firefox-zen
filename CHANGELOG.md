@@ -4,6 +4,20 @@ This project follows semantic versioning. The Firefox add-on and native companio
 always share one version and are released from a matching `vMAJOR.MINOR.PATCH`
 Git tag.
 
+## 1.4.4 - 2026-08-03
+
+- Resynced the complete inherited OpenAI extension distribution from packaged
+  version `1.2.27236.6274` instead of carrying only a targeted sidebar patch.
+- Retained the new upstream ChatGPT website integration alongside the Firefox
+  CDP compatibility content script.
+- Verified and regression-tested open-tab mentions, highlighted-text handoff,
+  Ask ChatGPT context menus, timestamped YouTube captions, browser-history
+  search, and browser/desktop thread handoff against the matching Helium build.
+- Preserved the upstream Ask ChatGPT item when refreshing the port's custom
+  Editing Assets context menus.
+- Included the upstream auth-state fix that prevents a null auth notification
+  from recursively re-reading the account and blanking the sidebar.
+
 ## 1.4.3 - 2026-08-02
 
 - Published the Firefox/Zen sidebar-open repair together with its matching

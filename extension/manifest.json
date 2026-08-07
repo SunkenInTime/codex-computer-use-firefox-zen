@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Codex Computer Use for Zen & Fox",
   "description": "Bring Codex computer use and its signed-in sidebar to Firefox and Zen Browser.",
-  "version": "1.4.3",
+  "version": "1.4.4",
   "icons": {
     "16": "images/firefox-zen-icon16.png",
     "32": "images/firefox-zen-icon32.png",
@@ -27,7 +27,7 @@
     }
   },
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'none'; connect-src 'self' http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:* https://ab.chatgpt.com https://chatgpt.com; font-src 'self' https://cdn.openai.com;"
+    "extension_pages": "script-src 'self'; object-src 'none'; connect-src 'self' http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:* https://ab.chatgpt.com https://chatgpt.com https://api.openai.com https://api.openai.org; font-src 'self' https://cdn.openai.com;"
   },
   "host_permissions": [
     "<all_urls>"
@@ -101,6 +101,16 @@
       "run_at": "document_start",
       "js": [
         "firefox-cdp-bridge.js"
+      ]
+    },
+    {
+      "matches": [
+        "https://chatgpt.com/*"
+      ],
+      "all_frames": false,
+      "run_at": "document_end",
+      "js": [
+        "content-scripts/chatgpt-website.js"
       ]
     }
   ],
