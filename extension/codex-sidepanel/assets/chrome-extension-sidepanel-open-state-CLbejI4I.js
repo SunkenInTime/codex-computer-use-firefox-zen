@@ -1,0 +1,1 @@
+var e=`codexSidePanelOpenWindowIds`;function t(e){return Array.isArray(e)?new Set(e.filter(e=>typeof e==`number`&&Number.isSafeInteger(e))):new Set}export{t as n,e as t};

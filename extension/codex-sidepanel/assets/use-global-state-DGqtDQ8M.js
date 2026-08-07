@@ -1,0 +1,1 @@
+import{St as e}from"./reduced-motion-preference-DWV8MCjl.js";import{tl as t}from"./app-server-manager-signals-DL-4UJGg.js";function n(n){return e(t,n)}export{n as t};

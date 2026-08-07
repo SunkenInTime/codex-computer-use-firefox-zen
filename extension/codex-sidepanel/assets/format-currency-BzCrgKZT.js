@@ -1,0 +1,1 @@
+function e({intl:e,amount:n,currencyCode:r,currencyFractionDigits:i}){let a=i??t({intl:e,currencyCode:r});return e.formatNumber(n,{style:`currency`,currency:r,minimumFractionDigits:a,maximumFractionDigits:a})}function t({intl:e,currencyCode:t}){return e.formatters.getNumberFormat(e.locale,{style:`currency`,currency:t}).resolvedOptions().maximumFractionDigits??0}export{e as t};

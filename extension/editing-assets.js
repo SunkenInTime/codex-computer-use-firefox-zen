@@ -110,7 +110,12 @@
   }
 
   async function createMenus() {
-    await browser.contextMenus.removeAll();
+    // Only replace this helper's own entries. The inherited ChatGPT bundle also
+    // owns context-menu items (including "Ask ChatGPT"), so removeAll() would
+    // silently erase upstream features whenever Firefox starts.
+    await Promise.all(Object.keys(ACTIONS).map((id) =>
+      browser.contextMenus.remove(`editing-assets-${id}`).catch(() => {})
+    ));
     for (const [id, action] of Object.entries(ACTIONS)) {
       await browser.contextMenus.create({
         id: `editing-assets-${id}`,
@@ -129,5 +134,5 @@
   browser.runtime.onStartup.addListener(() => void createMenus());
   void createMenus();
 
-  globalThis.__editingAssets = { ACTIONS, buildFilename, buildDownloadRequest, isSupportedSource, saveAsset };
+  globalThis.__editingAssets = { ACTIONS, buildFilename, buildDownloadRequest, isSupportedSource, saveAsset, createMenus };
 })();

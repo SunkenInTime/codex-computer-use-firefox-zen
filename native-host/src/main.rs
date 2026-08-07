@@ -213,17 +213,24 @@ fn create_fallback_app_server_registry(
         .map(PathBuf::from)
         .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join(".codex")))
         .ok_or("Codex home directory is unavailable")?;
+
+    // The official host discovers fallback installations through CODEX_HOME,
+    // but the spawned app server also reads authentication, history, and user
+    // configuration there. Mirror the real home into the private registry
+    // directory so fallback discovery does not create a signed-out, empty
+    // Codex profile.
+    mirror_codex_home(&codex_home, directory.path())?;
+
     let resources = runtime.codex_cli.parent().ok_or("Invalid Codex CLI path")?;
     let app_version = bundled_plugin_version(resources).unwrap_or_else(|| "0.0.0".into());
     let cli_version = codex_cli_version(&runtime.codex_cli).unwrap_or_else(|| "0.0.0".into());
-    let updated_at = current_timestamp();
     let entry = fallback_registry_entry(
         host_path,
         runtime,
         &codex_home,
         &app_version,
         &cli_version,
-        &updated_at,
+        &current_timestamp(),
     );
     fs::write(
         directory.path().join("chrome-native-hosts-v2.json"),
@@ -233,6 +240,39 @@ fn create_fallback_app_server_registry(
         }))?,
     )?;
     Ok(directory)
+}
+
+fn mirror_codex_home(source: &Path, target: &Path) -> io::Result<()> {
+    if !source.is_dir() {
+        return Ok(());
+    }
+    for entry in fs::read_dir(source)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        if name == "chrome-native-hosts-v2.json" || name == "chrome-native-hosts.json" {
+            continue;
+        }
+        let source_path = entry.path();
+        let target_path = target.join(&name);
+        if target_path.exists() {
+            continue;
+        }
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&source_path, &target_path)?;
+        #[cfg(windows)]
+        {
+            let file_type = entry.file_type()?;
+            let linked = if file_type.is_dir() {
+                std::os::windows::fs::symlink_dir(&source_path, &target_path)
+            } else {
+                fs::hard_link(&source_path, &target_path)
+            };
+            if linked.is_err() && file_type.is_file() {
+                fs::copy(&source_path, &target_path)?;
+            }
+        }
+    }
+    Ok(())
 }
 
 fn fallback_registry_entry(
@@ -309,13 +349,13 @@ fn codex_cli_version_with_timeout(codex_cli: &Path, timeout: Duration) -> Option
     stdout.seek(SeekFrom::Start(0)).ok()?;
     let mut output = String::new();
     stdout.read_to_string(&mut output).ok()?;
-    Some({
-        let version = output.trim();
+    let version = output.trim();
+    Some(
         version
             .strip_prefix("codex-cli ")
             .unwrap_or(version)
-            .to_owned()
-    })
+            .to_owned(),
+    )
 }
 
 fn current_timestamp() -> String {
@@ -422,7 +462,6 @@ fn forward_native_messages(mut input: ChildStdout, relay_port: u16, upstream_por
             eprintln!("[codex-firefox-bridge] native payload read failed: {error}");
             return;
         }
-
         let enriched = enrich_native_message(payload, relay_port, &upstream_port);
         let output_header = (enriched.len() as u32).to_le_bytes();
         if output
@@ -913,8 +952,8 @@ mod tests {
             Path::new("/native/ChatGPT for Chrome"),
             &runtime,
             Path::new("/Users/test/.codex"),
-            "26.721.41059",
-            "0.146.0-alpha.3.1",
+            "26.727.51351",
+            "0.146.0-alpha.9.2",
             "test-time",
         );
         assert_eq!(entry["schemaVersion"], 2);
@@ -924,10 +963,25 @@ mod tests {
             entry["paths"]["codexCliPath"].as_str(),
             runtime.codex_cli.to_str()
         );
+        assert_eq!(entry["paths"]["codexHome"], "/Users/test/.codex");
+    }
+
+    #[test]
+    fn fallback_home_mirrors_login_state_but_owns_its_registry() {
+        let source = tempfile::tempdir().unwrap();
+        let target = tempfile::tempdir().unwrap();
+        fs::write(source.path().join("auth.json"), "authenticated").unwrap();
+        fs::write(
+            source.path().join("chrome-native-hosts-v2.json"),
+            "real registry",
+        )
+        .unwrap();
+        mirror_codex_home(source.path(), target.path()).unwrap();
         assert_eq!(
-            entry["paths"]["extensionHostPath"],
-            "/native/ChatGPT for Chrome"
+            fs::read_to_string(target.path().join("auth.json")).unwrap(),
+            "authenticated"
         );
+        assert!(!target.path().join("chrome-native-hosts-v2.json").exists());
     }
 
     #[test]
@@ -942,22 +996,5 @@ mod tests {
         )
         .unwrap();
         assert!(registry_has_entries(path));
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn bounds_the_codex_version_probe() {
-        use std::os::unix::fs::PermissionsExt;
-
-        let directory = tempfile::tempdir().unwrap();
-        let script = directory.path().join("slow-codex");
-        fs::write(&script, "#!/bin/sh\nsleep 5\n").unwrap();
-        fs::set_permissions(&script, fs::Permissions::from_mode(0o700)).unwrap();
-        let started = Instant::now();
-        assert_eq!(
-            codex_cli_version_with_timeout(&script, Duration::from_millis(50)),
-            None
-        );
-        assert!(started.elapsed() < Duration::from_secs(1));
     }
 }

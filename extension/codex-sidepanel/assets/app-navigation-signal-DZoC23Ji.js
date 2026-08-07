@@ -1,0 +1,1 @@
+import{Pt as e,_t as t}from"./reduced-motion-preference-DWV8MCjl.js";var n=e(t,{navigate:a,navigateToLocalConversation:a});function r(e,...t){e.get(n).navigate(...t)}function i(e,...t){e.get(n).navigateToLocalConversation(...t)}function a(){throw Error(`AppNavigationSignalBridge is missing`)}export{r as n,i as r,n as t};

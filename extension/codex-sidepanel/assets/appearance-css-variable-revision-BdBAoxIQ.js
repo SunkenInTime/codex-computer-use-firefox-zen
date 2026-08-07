@@ -1,0 +1,1 @@
+import{Pt as e,_t as t}from"./reduced-motion-preference-DWV8MCjl.js";var n=e(t,Symbol());function r(e){e.set(n,Symbol())}export{r as n,n as t};

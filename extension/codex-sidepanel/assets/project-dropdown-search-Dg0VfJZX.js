@@ -1,0 +1,1 @@
+import{o as e}from"./rolldown-runtime-C_JxhDyB.js";import{t}from"./sortBy-C2TVkauc.js";import{n}from"./score-query-match-QI1-IuE9.js";var r=e(t(),1);function i(e,t,i){let a=t.trim();return a.length===0?e:(0,r.default)(e.map(e=>({project:e,score:Math.max(...i(e).map(e=>e==null?0:n(e,a)))})).filter(({score:e})=>e>0),({score:e})=>-e).map(({project:e})=>e)}export{i as t};

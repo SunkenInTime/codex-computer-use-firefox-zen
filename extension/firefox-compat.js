@@ -9,6 +9,76 @@
   const OFFICIAL_CHROME_EXTENSION_ID = "hehggadaopoacecdllhhajmbjkdcmajg";
   const BINDING_MESSAGE_SOURCE = "chatgpt-firefox-cdp";
 
+  const nativeFetch = typeof globalThis.fetch === "function"
+    ? globalThis.fetch.bind(globalThis)
+    : null;
+
+  if (nativeFetch != null) {
+    const extensionOrigin = new URL(firefox.runtime.getURL("/")).origin;
+    globalThis.fetch = async (input, init) => {
+      const inputUrl = typeof input === "string" || input instanceof URL
+        ? String(input)
+        : input?.url;
+      let parsedUrl = null;
+      try {
+        parsedUrl = typeof inputUrl === "string" ? new URL(inputUrl) : null;
+      } catch {}
+
+      if (parsedUrl?.origin === extensionOrigin && parsedUrl.pathname === "/_favicon/") {
+        const pageUrl = parsedUrl.searchParams.get("pageUrl");
+        if (pageUrl != null) {
+          try {
+            const tabs = await firefox.tabs.query({});
+            const tab = tabs.find((candidate) => candidate.url === pageUrl);
+            const faviconUrl = tab?.favIconUrl;
+            if (
+              typeof faviconUrl === "string" &&
+              faviconUrl.length > 0 &&
+              faviconUrl !== inputUrl
+            ) {
+              // Chrome exposes a virtual /_favicon/ endpoint. Firefox already
+              // resolves each tab's favicon URL. Try it directly first for
+              // data/extension URLs, then read it from the tab's isolated
+              // extension world. The latter avoids widening connect-src just
+              // to load arbitrary site icons.
+              try {
+                return await nativeFetch(faviconUrl, init);
+              } catch {}
+
+              if (Number.isInteger(tab?.id) && firefox.scripting?.executeScript != null) {
+                const [{ result } = {}] = await firefox.scripting.executeScript({
+                  target: { tabId: tab.id },
+                  func: async (url) => {
+                    try {
+                      const response = await fetch(url);
+                      if (!response.ok) return null;
+                      return {
+                        bytes: [...new Uint8Array(await response.arrayBuffer())],
+                        contentType: response.headers.get("content-type") ?? "image/png",
+                        status: response.status,
+                      };
+                    } catch {
+                      return null;
+                    }
+                  },
+                  args: [faviconUrl],
+                });
+                if (result?.bytes != null) {
+                  return new Response(new Uint8Array(result.bytes), {
+                    status: result.status ?? 200,
+                    headers: { "content-type": result.contentType ?? "image/png" },
+                  });
+                }
+              }
+            }
+          } catch {}
+        }
+      }
+
+      return nativeFetch(input, init);
+    };
+  }
+
   class CompatEvent {
     constructor() {
       this.listeners = new Set();
@@ -151,15 +221,50 @@
 
   const sidePanelOpened = new CompatEvent();
   const sidePanelClosed = new CompatEvent();
+  const actionUserSettingsChanged = new CompatEvent();
   const runtimeMessageListenerWrappers = new WeakMap();
+
+  const actionCompat = new Proxy(firefox.action, {
+    get(target, property) {
+      if (property === "getUserSettings") {
+        // Firefox does not expose Chrome's toolbar-pin inspection API. Treat
+        // the action as available so the inherited ChatGPT onboarding does not
+        // block sidebar use behind a Chrome-only pinning prompt.
+        return async () => ({ isOnToolbar: true });
+      }
+      if (property === "onUserSettingsChanged") {
+        return actionUserSettingsChanged;
+      }
+      return bindValue(target, property);
+    },
+  });
+
+  function isAuthoritativeFirefoxSidePanelSender(sender) {
+    return sender?.url === firefox.runtime.getURL("codex-sidepanel/index.html");
+  }
+
+  function normalizeFirefoxSidePanelSender(sender) {
+    return isAuthoritativeFirefoxSidePanelSender(sender) && sender.tab != null
+      ? { ...sender, tab: undefined }
+      : sender;
+  }
 
   function isAuthoritativeSidePanelEnsure(message, sender) {
     return (
       message?.type === "ensure_codex_app_server" &&
       Number.isSafeInteger(message.windowId) &&
       message.windowId >= 0 &&
-      sender?.tab == null &&
-      sender?.url === firefox.runtime.getURL("codex-sidepanel/index.html")
+      isAuthoritativeFirefoxSidePanelSender(sender)
+    );
+  }
+
+  function isAuthoritativeFirefoxSidePanelReady(message, sender) {
+    return (
+      message?.type === "codex_firefox_sidepanel_ready" &&
+      message.embedded === true &&
+      Number.isSafeInteger(message.windowId) &&
+      message.windowId >= 0 &&
+      isAuthoritativeFirefoxSidePanelSender(sender)
     );
   }
 
@@ -171,6 +276,9 @@
         ? stored[storageKey].filter((id) => Number.isSafeInteger(id))
         : [],
     );
+    if (windowIds.has(windowId)) {
+      return;
+    }
     windowIds.add(windowId);
     await firefox.storage.session.set({ [storageKey]: [...windowIds] });
     sidePanelOpened.emit({ windowId });
@@ -179,8 +287,33 @@
   const runtimeOnMessageCompat = {
     addListener(listener) {
       const wrapped = (message, sender, sendResponse) => {
+        if (isAuthoritativeFirefoxSidePanelReady(message, sender)) {
+          // The current upstream sidebar checks session storage before it asks
+          // the background to start the app server. Firefox does not expose a
+          // native sidebar-open event, so acknowledge the sidebar page itself
+          // before its upstream module is allowed to boot.
+          recordNativeSidePanelOpen(message.windowId)
+            .then(() => sendResponse({ ok: true }))
+            .catch(() => sendResponse({ ok: false }));
+          return true;
+        }
+
+        if (message?.type === "codex_firefox_sidepanel_ready") {
+          // Never leave the bootstrap waiting on a Firefox runtime message
+          // that the packaged Chrome background does not understand.
+          sendResponse({ ok: false });
+          return false;
+        }
+
+        // Firefox associates native-sidebar extension pages with the active
+        // browser tab. Chrome's side-panel sender has no tab, and the packaged
+        // handlers use that distinction to authorize tab mentions, local-file
+        // opens, and tab-context asset transfers. Normalize only the exact,
+        // unforgeable extension sidebar URL to Chrome's sender shape.
+        const packagedSender = normalizeFirefoxSidePanelSender(sender);
+
         if (!isAuthoritativeSidePanelEnsure(message, sender)) {
-          return listener(message, sender, sendResponse);
+          return listener(message, packagedSender, sendResponse);
         }
 
         // Firefox and Zen do not expose an event for a sidebar opened through
@@ -192,7 +325,7 @@
             // Still notify the in-memory listener if session storage failed.
             sidePanelOpened.emit({ windowId: message.windowId });
           })
-          .then(() => listener(message, sender, sendResponse));
+          .then(() => listener(message, packagedSender, sendResponse));
         return true;
       };
       runtimeMessageListenerWrappers.set(listener, wrapped);
@@ -3466,6 +3599,9 @@
       if (property === "runtime") {
         return runtimeCompat;
       }
+      if (property === "action") {
+        return actionCompat;
+      }
       if (property === "debugger") {
         return debuggerCompat;
       }
@@ -3488,6 +3624,7 @@
   }
 
   globalThis.__chatgptFirefoxCompat = {
+    action: actionCompat,
     debugger: debuggerCompat,
     sidePanel: sidePanelCompat,
     version: 1,

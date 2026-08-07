@@ -1,0 +1,1 @@
+import{n as e,t}from"./jsx-runtime-CNO-vQvX.js";var n=e(),r=t();function i(e){let t=(0,n.c)(2),{browser:i,chromeExtension:a,children:o,extension:s,electron:c}=e;if(!(a!==void 0&&a))return null;let l;return t[0]===o?l=t[1]:(l=(0,r.jsx)(r.Fragment,{children:o}),t[0]=o,t[1]=l),l}export{i as t};
