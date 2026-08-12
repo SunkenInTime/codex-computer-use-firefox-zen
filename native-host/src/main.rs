@@ -500,12 +500,27 @@ fn enrich_native_message(payload: Vec<u8>, relay_port: u16, upstream_port: &Atom
     let Ok(mut value) = serde_json::from_slice::<Value>(&payload) else {
         return payload;
     };
-    let changed =
-        enrich_commands(&mut value) | rewrite_websocket_urls(&mut value, relay_port, upstream_port);
+    let changed = enrich_bridge_version(&mut value)
+        | enrich_commands(&mut value)
+        | rewrite_websocket_urls(&mut value, relay_port, upstream_port);
     if !changed {
         return payload;
     }
     serde_json::to_vec(&value).unwrap_or(payload)
+}
+
+fn enrich_bridge_version(value: &mut Value) -> bool {
+    let Value::Object(message) = value else {
+        return false;
+    };
+    if message.get("method").and_then(Value::as_str) != Some("getInfo") {
+        return false;
+    }
+    message.insert(
+        "_firefoxBridgeVersion".into(),
+        Value::String(env!("CARGO_PKG_VERSION").into()),
+    );
+    true
 }
 
 fn enrich_commands(value: &mut Value) -> bool {
@@ -866,6 +881,20 @@ mod tests {
             value["nested"]["url"],
             "ws://127.0.0.1:54321/path?token=test"
         );
+    }
+
+    #[test]
+    fn reports_the_native_bridge_version_during_the_extension_handshake() {
+        let payload = serde_json::to_vec(&json!({
+            "jsonrpc": "2.0",
+            "id": "bridge-info",
+            "method": "getInfo"
+        }))
+        .unwrap();
+        let upstream = AtomicU16::new(0);
+        let enriched: Value =
+            serde_json::from_slice(&enrich_native_message(payload, 54321, &upstream)).unwrap();
+        assert_eq!(enriched["_firefoxBridgeVersion"], env!("CARGO_PKG_VERSION"));
     }
 
     #[test]

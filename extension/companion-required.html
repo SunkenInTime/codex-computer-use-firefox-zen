@@ -8,15 +8,34 @@
   </head>
   <body>
     <main>
-      <div class="mark" aria-hidden="true">C</div>
-      <p class="eyebrow">One-time setup</p>
-      <h1>Enable the Codex connection</h1>
-      <p class="lede">
+      <img class="mark" src="images/firefox-zen-icon96.png" alt="">
+      <p id="eyebrow" class="eyebrow">One-time setup</p>
+      <h1 id="page-title">Enable the Codex connection</h1>
+      <p id="page-lede" class="lede">
         Firefox needs a small local companion to connect this extension to your
         installed Codex host. It runs only while Codex is connected and does not
         operate a remote service.
       </p>
-      <section class="downloads" aria-label="Companion downloads">
+      <section id="version-status" class="version-status" aria-labelledby="version-status-title" hidden>
+        <h2 id="version-status-title">Installed versions</h2>
+        <dl>
+          <div>
+            <dt>Firefox extension</dt>
+            <dd id="extension-version">—</dd>
+          </div>
+          <div>
+            <dt>Native bridge</dt>
+            <dd id="bridge-version">—</dd>
+          </div>
+        </dl>
+      </section>
+      <section id="extension-update-section" class="downloads single" aria-label="Extension update" hidden>
+        <a class="download recommended" href="https://addons.mozilla.org/firefox/addon/codex-computer-use-for-zen/">
+          <strong>Update the Firefox extension</strong>
+          <span>Install the latest signed build from Mozilla Add-ons</span>
+        </a>
+      </section>
+      <section id="bridge-downloads" class="downloads" aria-label="Companion downloads">
         <a id="windows-download" class="download" href="#">
           <strong>Install for Windows</strong>
           <span>Per-user setup · Windows x64</span>
@@ -26,7 +45,7 @@
           <span>Universal package · Apple Silicon and Intel</span>
         </a>
       </section>
-      <section class="developer-install" aria-labelledby="developer-install-title">
+      <section id="developer-install" class="developer-install" aria-labelledby="developer-install-title">
         <div>
           <p class="option-label">Developer path</p>
           <h2 id="developer-install-title">Install with npm</h2>
@@ -41,9 +60,9 @@
         </div>
       </section>
       <ol>
-        <li>Choose a platform installer or the npm command above.</li>
-        <li>Keep the existing Codex Chrome integration installed.</li>
-        <li>Close this page and reopen the Codex sidebar.</li>
+        <li id="setup-step-one">Choose a platform installer or the npm command above.</li>
+        <li id="setup-step-two">Keep the existing Codex Chrome integration installed.</li>
+        <li id="setup-step-three">Close this page and reopen the Codex sidebar.</li>
       </ol>
       <section class="why" aria-labelledby="why-title">
         <h2 id="why-title">Why is this needed?</h2>
