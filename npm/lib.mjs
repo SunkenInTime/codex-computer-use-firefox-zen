@@ -37,6 +37,53 @@ export function releaseBase(version) {
   ).replace(/\/$/u, "");
 }
 
+/**
+ * Downloads a release asset, retrying transient HTTP and network failures.
+ *
+ * @param {string} url Release asset URL.
+ * @param {object} [options] Retry and dependency-injection options.
+ * @returns {Promise<Buffer>} Downloaded asset bytes.
+ */
+export async function downloadWithRetry(
+  url,
+  {
+    attempts = 4,
+    baseDelayMs = 500,
+    fetchImpl = globalThis.fetch,
+    headers = {},
+    sleep = (milliseconds) =>
+      new Promise((resolve) => setTimeout(resolve, milliseconds))
+  } = {}
+) {
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      const response = await fetchImpl(url, { headers, redirect: "follow" });
+      if (response.ok) {
+        return Buffer.from(await response.arrayBuffer());
+      }
+      lastError = new Error(`Download failed (${response.status}): ${url}`);
+      lastError.retryable =
+        response.status === 408 ||
+        response.status === 425 ||
+        response.status === 429 ||
+        response.status >= 500;
+      if (!lastError.retryable) {
+        throw lastError;
+      }
+    } catch (error) {
+      lastError = error;
+      if (error.retryable === false) {
+        throw error;
+      }
+    }
+    if (attempt < attempts) {
+      await sleep(baseDelayMs * 2 ** (attempt - 1));
+    }
+  }
+  throw lastError;
+}
+
 export function installLocations(
   platform = process.platform,
   environment = process.env,
@@ -107,6 +154,38 @@ export function assertSafeInstallDirectory(directory, platform = process.platfor
     throw new Error("LOCALAPPDATA is unavailable.");
   }
   return resolved;
+}
+
+/**
+ * Checks whether a process executable is a versioned bridge in the install directory.
+ *
+ * @param {string} executablePath Candidate executable path.
+ * @param {string} installDirectory Validated bridge installation directory.
+ * @param {string} [platform] Path semantics to use.
+ * @returns {boolean} Whether the executable belongs to this installation.
+ */
+export function isInstalledBridgeBinary(
+  executablePath,
+  installDirectory,
+  platform = process.platform
+) {
+  if (!executablePath || !installDirectory) {
+    return false;
+  }
+  const platformPath = platform === "win32" ? path.win32 : path.posix;
+  const resolvedDirectory = platformPath.resolve(installDirectory);
+  const resolvedExecutable = platformPath.resolve(executablePath);
+  const relative = platformPath.relative(resolvedDirectory, resolvedExecutable);
+  if (
+    relative.startsWith("..") ||
+    platformPath.isAbsolute(relative) ||
+    relative.includes(platformPath.sep)
+  ) {
+    return false;
+  }
+  return /^codex-firefox-bridge-\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?\.exe$/iu.test(
+    relative
+  );
 }
 
 export function readInstalledManifest(manifestPath) {
