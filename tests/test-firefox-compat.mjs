@@ -31,10 +31,15 @@ const executedFaviconTargets = [];
 const createdTabs = [];
 const fetchedUrls = [];
 const storedValues = {};
+let allWebsiteAccessGranted = true;
+let captureVisibleTabCalls = [];
+let targetTabActive = true;
+const tabUpdateCalls = [];
+const nativePostedMessages = [];
 const nativePort = {
   onMessage: new EventMock(),
   onDisconnect: new EventMock(),
-  postMessage() {},
+  postMessage(message) { nativePostedMessages.push(message); },
   disconnect() {},
 };
 const browser = {
@@ -49,7 +54,13 @@ const browser = {
     async setBadgeBackgroundColor() {},
     async setBadgeText() {},
   },
-  permissions: { async request() { return true; } },
+  permissions: {
+    async contains(details) {
+      assert.equal(JSON.stringify(details), JSON.stringify({ origins: ["<all_urls>"] }));
+      return allWebsiteAccessGranted;
+    },
+    async request() { return true; },
+  },
   sidebarAction: { async open() {}, async close() {} },
   storage: {
     local: {
@@ -63,11 +74,24 @@ const browser = {
   },
   tabs: {
     onUpdated: new EventMock(), onRemoved: new EventMock(),
-    async query() { return [{ id: 1, windowId: 10, index: 0, url: "https://top.test/", title: "Top", active: true, favIconUrl: "https://top.test/favicon.ico" }]; },
-    async get() { return { id: 1, windowId: 10, index: 0, url: "https://top.test/", title: "Top", active: true, favIconUrl: "https://top.test/favicon.ico" }; },
+    async query(queryInfo) {
+      if (queryInfo?.active && !targetTabActive) {
+        return [{ id: 2, windowId: 10, index: 1, url: "https://other.test/", title: "Other", active: true }];
+      }
+      return [{ id: 1, windowId: 10, index: 0, url: "https://top.test/", title: "Top", active: targetTabActive, favIconUrl: "https://top.test/favicon.ico" }];
+    },
+    async get() { return { id: 1, windowId: 10, index: 0, url: "https://top.test/", title: "Top", active: targetTabActive, favIconUrl: "https://top.test/favicon.ico" }; },
     async create(details) { createdTabs.push(details); },
-    async update() {}, async remove() {}, async reload() {}, async setZoom() {},
+    async update(tabId, details) {
+      tabUpdateCalls.push({ tabId, details });
+      if (details?.active) targetTabActive = tabId === 1;
+    },
+    async remove() {}, async reload() {}, async setZoom() {},
     async captureTab() { return "data:image/png;base64,dGVzdA=="; },
+    async captureVisibleTab(windowId, options) {
+      captureVisibleTabCalls.push({ windowId, options });
+      return "data:image/png;base64,ZmFsbGJhY2s=";
+    },
   },
   windows: { async get() { return { id: 10, state: "normal", width: 1200, height: 800, left: 0, top: 0 }; }, async update() { return {}; } },
   webNavigation: {
@@ -140,6 +164,26 @@ assert.equal(
   "function",
   "The current OpenAI background requires a Firefox-safe toolbar settings event.",
 );
+
+const identityPort = context.chrome.runtime.connectNative("com.openai.codexextension");
+identityPort.onMessage.addListener(() => {});
+nativePort.onMessage.emit({ id: "bridge-info", method: "getInfo" });
+identityPort.postMessage({
+  id: "bridge-info",
+  result: {
+    name: "Chrome",
+    metadata: { extensionInstanceId: "test-instance" },
+  },
+});
+const bridgeIdentity = nativePostedMessages.at(-1).result;
+assert.equal(bridgeIdentity.name, "Codex Firefox Bridge (Firefox/Zen)");
+assert.equal(bridgeIdentity.metadata.actualBrowserFamily, "firefox");
+assert.equal(bridgeIdentity.metadata.bridgeName, "codex-firefox-bridge");
+assert.equal(bridgeIdentity.metadata.bridgeVersion, "test");
+assert.equal(bridgeIdentity.metadata.compatibilityFamily, "chrome");
+assert.equal(bridgeIdentity.metadata.extensionId, "hehggadaopoacecdllhhajmbjkdcmajg");
+assert.equal(bridgeIdentity.metadata.geckoExtensionId, "codex-computer-use-firefox-zen@sunkenintime");
+assert.equal(bridgeIdentity.metadata.extensionInstanceId, "test-instance");
 
 const faviconResponse = await context.fetch("moz-extension://test/_favicon/?pageUrl=https%3A%2F%2Ftop.test%2F&size=32");
 assert.equal(faviconResponse.ok, true);
@@ -229,7 +273,35 @@ assert.equal(createdTabs[0].url, "moz-extension://test/companion-required.html")
 
 const events = [];
 compat.debugger.onEvent.addListener((sourceInfo, method, params) => events.push({ sourceInfo, method, params }));
+allWebsiteAccessGranted = false;
+await assert.rejects(
+  compat.debugger.attach({ tabId: 1 }),
+  /Firefox website access is disabled/u,
+  "Revoked Firefox host access must fail before the raw scripting error.",
+);
+allWebsiteAccessGranted = true;
 await compat.debugger.attach({ tabId: 1 });
+
+const captureTab = browser.tabs.captureTab;
+browser.tabs.captureTab = undefined;
+targetTabActive = false;
+tabUpdateCalls.length = 0;
+const fallbackScreenshot = await compat.debugger.sendCommand({ tabId: 1 }, "Page.captureScreenshot", { format: "png" });
+browser.tabs.captureTab = captureTab;
+assert.equal(fallbackScreenshot.data, "ZmFsbGJhY2s=");
+assert.equal(
+  JSON.stringify(captureVisibleTabCalls),
+  JSON.stringify([{ windowId: 10, options: { format: "png" } }]),
+);
+assert.equal(
+  JSON.stringify(tabUpdateCalls),
+  JSON.stringify([
+    { tabId: 1, details: { active: true } },
+    { tabId: 2, details: { active: true } },
+  ]),
+  "Visible-tab fallback must restore the tab that was active before capture.",
+);
+targetTabActive = true;
 
 const tree = await compat.debugger.sendCommand({ tabId: 1 }, "Page.getFrameTree", {});
 assert.equal(tree.frameTree.frame.id, "firefox-frame-1");
@@ -289,4 +361,4 @@ const unpausedResponse = beforeRequest({ requestId: "req-3", tabId: 1, frameId: 
 assert.equal(JSON.stringify(unpausedResponse), "{}", "Empty Fetch patterns must clear interception instead of pausing every request.");
 assert.equal(events.filter((event) => event.method === "Fetch.requestPaused").length, pauseCount);
 
-console.log(JSON.stringify({ ok: true, toolbarSettings: true, nativeSidebarTracking: true, frameTree: true, childExecution: true, keyboardSyntax: true, liveNetworkEvents: true, responseBody: true, fetchInterception: true, fetchEmptyPatternClear: true }, null, 2));
+console.log(JSON.stringify({ ok: true, bridgeIdentity: true, toolbarSettings: true, nativeSidebarTracking: true, hostAccessPreflight: true, screenshotFallback: true, frameTree: true, childExecution: true, keyboardSyntax: true, liveNetworkEvents: true, responseBody: true, fetchInterception: true, fetchEmptyPatternClear: true }, null, 2));

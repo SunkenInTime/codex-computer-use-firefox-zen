@@ -1,12 +1,13 @@
 {
   "name": "codex-computer-use-firefox-zen",
   "private": true,
-  "version": "1.4.4",
+  "type": "module",
+  "version": "1.4.5",
   "description": "Codex computer-use compatibility port for Firefox and Zen Browser",
   "scripts": {
     "check": "node scripts/check-version.mjs && node scripts/verify-extension.mjs",
     "version:set": "node scripts/set-version.mjs",
-    "test": "npm run check && node tests/test-sidepanel-focus-compat.mjs && node tests/test-sidepanel-bootstrap.mjs && node tests/test-chatgpt-feature-parity.mjs && node tests/test-firefox-compat.mjs && node tests/test-editing-assets.mjs && node tests/test-native-host.mjs",
+    "test": "npm run check && node tests/test-sidepanel-focus-compat.mjs && node tests/test-sidepanel-host-access.mjs && node tests/test-sidepanel-bootstrap.mjs && node tests/test-chatgpt-feature-parity.mjs && node tests/test-firefox-compat.mjs && node tests/test-editing-assets.mjs && node tests/test-native-host.mjs",
     "package": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-extension.ps1"
   }
 }

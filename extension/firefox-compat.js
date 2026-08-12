@@ -7,6 +7,7 @@
   }
 
   const OFFICIAL_CHROME_EXTENSION_ID = "hehggadaopoacecdllhhajmbjkdcmajg";
+  const FIREFOX_BRIDGE_DISPLAY_NAME = "Codex Firefox Bridge (Firefox/Zen)";
   const BINDING_MESSAGE_SOURCE = "chatgpt-firefox-cdp";
 
   const nativeFetch = typeof globalThis.fetch === "function"
@@ -201,9 +202,13 @@
                 ...message,
                 result: {
                   ...message.result,
-                  name: "Firefox",
+                  name: FIREFOX_BRIDGE_DISPLAY_NAME,
                   metadata: {
                     ...message.result.metadata,
+                    actualBrowserFamily: "firefox",
+                    bridgeName: "codex-firefox-bridge",
+                    bridgeVersion: firefox.runtime.getManifest().version,
+                    compatibilityFamily: "chrome",
                     extensionId: OFFICIAL_CHROME_EXTENSION_ID,
                     geckoExtensionId: firefox.runtime.id,
                   },
@@ -566,6 +571,14 @@
     if (firefox.scripting?.executeScript == null) {
       throw new Error(
         "Firefox page automation requires scripting.executeScript support.",
+      );
+    }
+    if (
+      typeof firefox.permissions?.contains === "function"
+      && !await firefox.permissions.contains({ origins: ["<all_urls>"] })
+    ) {
+      throw new Error(
+        "Firefox website access is disabled. Reopen the Codex sidebar, choose Allow all websites, and then retry this browser action.",
       );
     }
   }
@@ -1079,7 +1092,28 @@
     if (format === "jpeg" && Number.isInteger(params.quality)) {
       options.quality = Math.max(0, Math.min(100, params.quality));
     }
-    const dataUrl = await firefox.tabs.captureTab(tabId, options);
+    let dataUrl;
+    if (typeof firefox.tabs.captureTab === "function") {
+      dataUrl = await firefox.tabs.captureTab(tabId, options);
+    } else if (typeof firefox.tabs.captureVisibleTab === "function") {
+      const targetTab = await firefox.tabs.get(tabId);
+      const [previousActiveTab] = await firefox.tabs.query({ active: true, windowId: targetTab.windowId });
+      const shouldRestore = !targetTab.active && previousActiveTab?.id != null && previousActiveTab.id !== tabId;
+      if (!targetTab.active) {
+        await firefox.tabs.update(tabId, { active: true });
+      }
+      try {
+        dataUrl = await firefox.tabs.captureVisibleTab(targetTab.windowId, options);
+      } finally {
+        if (shouldRestore) {
+          await firefox.tabs.update(previousActiveTab.id, { active: true }).catch(() => {});
+        }
+      }
+    } else {
+      throw new Error(
+        "Firefox screenshot capture requires tabs.captureTab or tabs.captureVisibleTab support.",
+      );
+    }
     const comma = dataUrl.indexOf(",");
     return { data: comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl };
   }
