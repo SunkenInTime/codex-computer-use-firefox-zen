@@ -6,6 +6,9 @@ Git tag.
 
 ## Unreleased
 
+- Fixed `@` open-tab mentions in Firefox and Zen by recognizing the port's
+  native tab provider instead of discarding its results behind a Chrome-only
+  plugin-discovery flag.
 - Fixed Windows companion removal when Firefox or Zen left an installed bridge
   process running after the browser exited.
 - Retried transient network and GitHub server failures while downloading npm
