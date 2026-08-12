@@ -8,6 +8,8 @@ The original OpenAI sidebar and background application are retained. The compati
 
 - Firefox `sidebar_action` support in place of Chrome `sidePanel`;
 - a persistent Firefox background page in place of a Manifest V3 service worker;
+- explicit `Codex Firefox Bridge (Firefox/Zen)` discovery metadata while retaining
+  the official host's Chrome-compatible transport family;
 - translation of the `chrome.debugger`/CDP operations used by OpenAI's browser-control client into Firefox tab, cookie, screenshot, scripting, DOM, and input APIs;
 - a native-messaging adapter that securely relays to the locally installed official OpenAI extension host;
 - local-file transfer for controlled file inputs;
@@ -120,7 +122,8 @@ The OpenAI native extension host must already be installed by ChatGPT/Codex tool
 2. In Zen or Firefox, open `about:debugging#/runtime/this-firefox`.
 3. Select **Load Temporary Add-on**, then choose `extension/manifest.json`.
 4. Open the Codex computer-use sidebar from the toolbar button or its configured shortcut.
-5. Start a Codex computer-use task. Page execution uses Firefox's standard `scripting.executeScript` API; the add-on does not request the user-script-manager-only `userScripts` permission.
+5. If prompted, choose **Allow all websites**. Firefox requires this host access before Codex can continue controlling a page after navigation or in a newly opened tab. You can revoke it later from **Add-ons and themes → Codex Computer Use for Zen & Fox → Permissions and data**.
+6. Start a Codex computer-use task. Page execution uses Firefox's standard `scripting.executeScript` API; the add-on does not request the user-script-manager-only `userScripts` permission.
 
 Temporary add-ons are removed when the browser exits. Permanent installation requires Mozilla signing while retaining the Gecko ID `codex-computer-use-firefox-zen@sunkenintime`.
 

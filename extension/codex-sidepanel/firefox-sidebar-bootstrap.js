@@ -1,6 +1,11 @@
-const extension = globalThis.browser ?? globalThis.chrome;
+import { ensureFirefoxHostAccess } from "./firefox-host-access.js";
 
-if (/Firefox\//.test(navigator.userAgent)) {
+const extension = globalThis.browser ?? globalThis.chrome;
+const isFirefox = /Firefox\//.test(navigator.userAgent);
+
+if (isFirefox && !await ensureFirefoxHostAccess({ extension })) {
+  // The permission prompt owns the sidebar until Firefox grants website access.
+} else if (isFirefox) {
   try {
     const windowId = (await extension.windows.getCurrent()).id;
     const isNativeSidebar =
@@ -16,6 +21,7 @@ if (/Firefox\//.test(navigator.userAgent)) {
     // Let the upstream surface render its normal recovery state if Firefox
     // cannot identify or acknowledge the native sidebar window.
   }
+  await import("./assets/chrome-extension-sidepanel-Bf7FJEU3.js");
+} else {
+  await import("./assets/chrome-extension-sidepanel-Bf7FJEU3.js");
 }
-
-await import("./assets/chrome-extension-sidepanel-Bf7FJEU3.js");

@@ -4,6 +4,20 @@ This project follows semantic versioning. The Firefox add-on and native companio
 always share one version and are released from a matching `vMAJOR.MINOR.PATCH`
 Git tag.
 
+## 1.4.5 - 2026-08-11
+
+- Advertised an explicit `Codex Firefox Bridge (Firefox/Zen)` browser name and
+  structured Firefox-versus-Chrome-compatibility metadata to browser-control
+  clients, so diagnostics can identify the real browser without changing the
+  Chrome-compatible transport contract.
+- Added a Firefox sidebar preflight that explains and requests all-websites host
+  access before Codex starts, preventing automation from failing only after a
+  navigation or new-tab transition.
+- Replaced Firefox's raw missing-host-permission failure with actionable recovery
+  guidance when website access is revoked while Codex is running.
+- Added a `tabs.captureVisibleTab` fallback for Zen builds that do not expose
+  Firefox's nominal `tabs.captureTab` API.
+
 ## 1.4.4 - 2026-08-03
 
 - Resynced the complete inherited OpenAI extension distribution from packaged

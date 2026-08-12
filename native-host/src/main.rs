@@ -421,7 +421,10 @@ fn rewrite_firefox_extension_id(value: &mut Value) -> bool {
             }
         }
         Value::Object(object) => {
-            for child in object.values_mut() {
+            for (key, child) in object.iter_mut() {
+                if key == "geckoExtensionId" {
+                    continue;
+                }
                 changed |= rewrite_firefox_extension_id(child);
             }
         }
@@ -881,6 +884,30 @@ mod tests {
         assert_eq!(
             rewritten["params"]["constraints"]["extensionId"],
             OFFICIAL_CHROME_EXTENSION_ID
+        );
+    }
+
+    #[test]
+    fn preserves_the_real_gecko_id_in_bridge_metadata() {
+        let payload = serde_json::to_vec(&json!({
+            "jsonrpc": "2.0",
+            "id": "bridge-info",
+            "result": {
+                "metadata": {
+                    "extensionId": FIREFOX_EXTENSION_ID,
+                    "geckoExtensionId": FIREFOX_EXTENSION_ID
+                }
+            }
+        }))
+        .unwrap();
+        let rewritten: Value = serde_json::from_slice(&rewrite_native_request(payload)).unwrap();
+        assert_eq!(
+            rewritten["result"]["metadata"]["extensionId"],
+            OFFICIAL_CHROME_EXTENSION_ID
+        );
+        assert_eq!(
+            rewritten["result"]["metadata"]["geckoExtensionId"],
+            FIREFOX_EXTENSION_ID
         );
     }
 
