@@ -28,6 +28,10 @@ assert.ok(websiteRegistration, "The ChatGPT website bridge must be registered so
 assert.ok(chatgptWebsite.includes("search_browser_tab_mentions"), "The ChatGPT website bridge is missing tab-mention search.");
 assert.ok(chatgptWebsite.includes("chatgpt-extension-request-browser-tabs"), "The ChatGPT website bridge is missing the tab-mention request event.");
 assert.ok(background.includes("browserTabMentionsOnly"), "The background bundle is missing the filtered open-tab provider.");
+assert.ok(
+  sidebarIncludes("__codexFirefoxTabMentionProviderAvailable===!0||"),
+  "The sidebar must recognize Firefox's native tab-mention provider without a Chrome plugin-discovery result.",
+);
 
 assert.ok(background.includes('title:"Ask ChatGPT"'), "The inherited page and selection context menu is missing.");
 assert.ok(background.includes('contexts:["page","frame","selection","link","editable","image","video","audio"]'), "Ask ChatGPT must be available for pages and selections.");

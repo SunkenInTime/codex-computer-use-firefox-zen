@@ -4,6 +4,12 @@ This project follows semantic versioning. The Firefox add-on and native companio
 always share one version and are released from a matching `vMAJOR.MINOR.PATCH`
 Git tag.
 
+## Unreleased
+
+- Fixed `@` open-tab mentions in Firefox and Zen by recognizing the port's
+  native tab provider instead of discarding its results behind a Chrome-only
+  plugin-discovery flag.
+
 ## 1.4.5 - 2026-08-11
 
 - Advertised an explicit `Codex Firefox Bridge (Firefox/Zen)` browser name and

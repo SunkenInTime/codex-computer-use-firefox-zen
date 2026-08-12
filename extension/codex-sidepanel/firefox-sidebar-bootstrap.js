@@ -6,6 +6,10 @@ const isFirefox = /Firefox\//.test(navigator.userAgent);
 if (isFirefox && !await ensureFirefoxHostAccess({ extension })) {
   // The permission prompt owns the sidebar until Firefox grants website access.
 } else if (isFirefox) {
+  // The Firefox port supplies open-tab mentions directly through its own
+  // privileged runtime. The inherited UI otherwise waits for a Chrome-only
+  // plugin-discovery flag and discards valid Firefox tab candidates.
+  globalThis.__codexFirefoxTabMentionProviderAvailable = true;
   try {
     const windowId = (await extension.windows.getCurrent()).id;
     const isNativeSidebar =
