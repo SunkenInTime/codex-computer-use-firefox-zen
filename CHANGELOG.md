@@ -6,6 +6,10 @@ Git tag.
 
 ## Unreleased
 
+- Made accessibility inspection, DOM snapshots, element geometry, pointer,
+  keyboard, text, and scroll operations work on strict-CSP sites such as
+  ChatGPT and Expedia without evaluating dynamically generated page scripts.
+
 ## 1.4.6 - 2026-08-12
 
 - Fixed `@` open-tab mentions in Firefox and Zen by recognizing the port's
