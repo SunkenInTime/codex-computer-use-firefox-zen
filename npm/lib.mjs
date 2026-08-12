@@ -37,6 +37,13 @@ export function releaseBase(version) {
   ).replace(/\/$/u, "");
 }
 
+/**
+ * Downloads a release asset, retrying transient HTTP and network failures.
+ *
+ * @param {string} url Release asset URL.
+ * @param {object} [options] Retry and dependency-injection options.
+ * @returns {Promise<Buffer>} Downloaded asset bytes.
+ */
 export async function downloadWithRetry(
   url,
   {
@@ -149,6 +156,14 @@ export function assertSafeInstallDirectory(directory, platform = process.platfor
   return resolved;
 }
 
+/**
+ * Checks whether a process executable is a versioned bridge in the install directory.
+ *
+ * @param {string} executablePath Candidate executable path.
+ * @param {string} installDirectory Validated bridge installation directory.
+ * @param {string} [platform] Path semantics to use.
+ * @returns {boolean} Whether the executable belongs to this installation.
+ */
 export function isInstalledBridgeBinary(
   executablePath,
   installDirectory,

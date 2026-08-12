@@ -118,6 +118,12 @@ function doctor() {
   console.log(diagnostic);
 }
 
+/**
+ * Stops versioned bridge processes running from the validated install directory.
+ *
+ * @param {string} directory Validated bridge installation directory.
+ * @returns {void}
+ */
 function stopWindowsBridgeProcesses(directory) {
   let output;
   try {
