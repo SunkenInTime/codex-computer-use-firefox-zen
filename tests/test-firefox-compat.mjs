@@ -176,7 +176,7 @@ identityPort.postMessage({
   },
 });
 const bridgeIdentity = nativePostedMessages.at(-1).result;
-assert.equal(bridgeIdentity.name, "Codex Firefox Bridge (Firefox/Zen)");
+assert.equal(bridgeIdentity.name, "Codex Firefox Bridge (Firefox and Zen Browser)");
 assert.equal(bridgeIdentity.metadata.actualBrowserFamily, "firefox");
 assert.equal(bridgeIdentity.metadata.bridgeName, "codex-firefox-bridge");
 assert.equal(bridgeIdentity.metadata.bridgeVersion, "test");
@@ -250,7 +250,7 @@ const keepsChannelOpen = packagedMessageListener(
 assert.equal(keepsChannelOpen, true, "Authoritative sidebar startup must keep the async response channel open.");
 await new Promise((resolve) => setTimeout(resolve, 0));
 assert.equal(packagedMessageCalls, 2, "The packaged message handler must run after sidebar state is repaired.");
-assert.equal(JSON.stringify(storedValues.codexSidePanelOpenWindowIds), "[10]", "A native Firefox/Zen sidebar open must be persisted.");
+assert.equal(JSON.stringify(storedValues.codexSidePanelOpenWindowIds), "[10]", "A native Firefox and Zen Browser sidebar open must be persisted.");
 assert.equal(sidePanelOpenEvents.length, 1, "Repeated sidebar startup must not re-emit sidePanel.onOpened.");
 assert.equal(sidePanelOpenEvents[0].windowId, 10);
 assert.deepEqual(sidePanelEnsureResponses, [{ ok: true }]);

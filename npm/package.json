@@ -1,7 +1,7 @@
 {
   "name": "codex-firefox-bridge",
   "version": "1.4.5",
-  "description": "Install and manage the Codex native-messaging bridge for Firefox and Zen",
+  "description": "Install and manage the Codex native-messaging bridge for Firefox and Zen Browser",
   "type": "module",
   "bin": {
     "codex-firefox-bridge": "cli.mjs"

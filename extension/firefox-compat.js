@@ -7,7 +7,7 @@
   }
 
   const OFFICIAL_CHROME_EXTENSION_ID = "hehggadaopoacecdllhhajmbjkdcmajg";
-  const FIREFOX_BRIDGE_DISPLAY_NAME = "Codex Firefox Bridge (Firefox/Zen)";
+  const FIREFOX_BRIDGE_DISPLAY_NAME = "Codex Firefox Bridge (Firefox and Zen Browser)";
   const BINDING_MESSAGE_SOURCE = "chatgpt-firefox-cdp";
 
   const nativeFetch = typeof globalThis.fetch === "function"
@@ -321,7 +321,7 @@
           return listener(message, packagedSender, sendResponse);
         }
 
-        // Firefox and Zen do not expose an event for a sidebar opened through
+        // Firefox and Zen Browser do not expose an event for a sidebar opened through
         // their native View > Sidebar UI. The sidebar page itself is therefore
         // authoritative for this request. Record it before the packaged
         // background handler reloads the persisted per-window open state.

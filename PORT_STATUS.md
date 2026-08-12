@@ -1,6 +1,6 @@
-# Codex Computer Use for Zen & Fox — port status
+# Codex Computer Use for Firefox and Zen Browser — port status
 
-Live verification was completed on July 15, 2026 with Zen 1.21.6b, Gecko/Firefox 152.0.5, and the packaged OpenAI extension version `1.2.27203.26575`. All work described here stays in the normal WebExtension tier: no browser flags, patched Zen build, privileged experiment API, or external automation daemon is required.
+Live verification was completed on July 15, 2026 with Zen Browser 1.21.6b, Gecko/Firefox 152.0.5, and the packaged OpenAI extension version `1.2.27203.26575`. All work described here stays in the normal WebExtension tier: no browser flags, patched Zen Browser build, privileged experiment API, or external automation daemon is required.
 
 On August 6, 2026, the port was resynced to OpenAI extension
 `1.2.27236.6274` and compared with the current copy installed in Helium. The
@@ -42,7 +42,7 @@ Normal ChatGPT computer-use workflows reached feature parity in testing. The rem
 3. DevTools-only tracing and JavaScript debugger pause/resume commands are compatibility no-ops. They are not part of the extension's user-facing computer-use workflow.
 4. Firefox does not expose Chrome renderer/debugger targets. The port synthesizes target/session/frame scoping for the CDP methods used by computer use, including tested nested cross-origin interaction, but it is not a general replacement for every third-party CDP debugger client.
 5. The tested manifest requires Firefox 152 or newer. Older Firefox releases may work but were not certified.
-6. The generated archive is unsigned. Firefox/Zen removes a temporary add-on at restart; permanent distribution requires Mozilla signing. This is an installation constraint, not a runtime feature difference.
+6. The generated archive is unsigned. Firefox and Zen Browser remove a temporary add-on at restart; permanent distribution requires Mozilla signing. This is an installation constraint, not a runtime feature difference.
 
 Firefox also lacks Chrome's extension debugger API and service-worker/side-panel combination used by the original package. Those are handled by the compatibility layer and do not remain user-visible limitations in the tested build.
 

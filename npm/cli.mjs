@@ -207,7 +207,7 @@ Usage:
   codex-firefox-bridge uninstall
 
 The install command downloads the matching bridge release, verifies its SHA-256
-checksum, installs it per-user, and registers it with Firefox and Zen.`);
+checksum, installs it per-user, and registers it with Firefox and Zen Browser.`);
 }
 
 try {

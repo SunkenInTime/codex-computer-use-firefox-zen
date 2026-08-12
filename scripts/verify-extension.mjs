@@ -21,6 +21,9 @@ function existsInExtension(relativePath) {
 
 const manifest = JSON.parse(read("extension/manifest.json"));
 assert(manifest.manifest_version === 3, "The port must remain a Manifest V3 extension.");
+assert(manifest.name === "Codex Computer Use for Firefox", "Unexpected extension display name.");
+assert(manifest.action?.default_title === "Codex for Firefox and Zen Browser", "Unexpected toolbar display name.");
+assert(manifest.sidebar_action?.default_title === "Codex for Firefox and Zen Browser", "Unexpected sidebar display name.");
 assert(manifest.browser_specific_settings?.gecko?.id === "codex-computer-use-firefox-zen@sunkenintime", "Unexpected Gecko extension ID.");
 assert(manifest.sidebar_action?.default_panel === "codex-sidepanel/index.html", "The Firefox sidebar is not wired to the ChatGPT panel.");
 assert(manifest.background?.scripts?.[0] === "firefox-compat.js", "The compatibility layer must load before the packaged background bundle.");
@@ -56,6 +59,9 @@ new vm.Script(read("extension/companion-required.js"), { filename: "companion-re
 const setupHtml = read("extension/companion-required.html");
 assert(setupHtml.includes("codex-firefox-bridge@"), "The npm installation path is missing from setup.");
 assert(setupHtml.includes("Why is this needed?"), "The setup page must explain why the companion is required.");
+for (const size of ["16", "24", "32", "48", "64", "96", "128"]) {
+  assert(size in manifest.icons, `Missing ${size}px icon declaration.`);
+}
 for (const [size, icon] of Object.entries(manifest.icons)) {
   assert(existsInExtension(icon), `Missing ${size}px icon: ${icon}`);
 }

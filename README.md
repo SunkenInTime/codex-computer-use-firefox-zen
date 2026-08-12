@@ -1,6 +1,6 @@
-# Codex Computer Use for Zen & Fox
+# Codex Computer Use for Firefox and Zen Browser
 
-This is a Firefox-compatible port of OpenAI's official browser extension (`hehggadaopoacecdllhhajmbjkdcmajg`), based on packaged extension version `1.2.27236.6274` (build `ad34341c30168f421705cd15f1633ebe6cea7849`). Zen is supported as a Firefox browser and is the primary live-test target.
+This is a Firefox-compatible port of OpenAI's official browser extension (`hehggadaopoacecdllhhajmbjkdcmajg`), based on packaged extension version `1.2.27236.6274` (build `ad34341c30168f421705cd15f1633ebe6cea7849`). Zen Browser is supported as a Firefox-based browser and is the primary live-test target.
 
 This is an independent compatibility project. It is not an official OpenAI, Mozilla, or Zen Browser release and is not endorsed by those organizations. You need an existing ChatGPT/Codex installation and account; this repository does not include or bypass account access.
 
@@ -8,7 +8,7 @@ The original OpenAI sidebar and background application are retained. The compati
 
 - Firefox `sidebar_action` support in place of Chrome `sidePanel`;
 - a persistent Firefox background page in place of a Manifest V3 service worker;
-- explicit `Codex Firefox Bridge (Firefox/Zen)` discovery metadata while retaining
+- explicit `Codex Firefox Bridge (Firefox and Zen Browser)` discovery metadata while retaining
   the official host's Chrome-compatible transport family;
 - translation of the `chrome.debugger`/CDP operations used by OpenAI's browser-control client into Firefox tab, cookie, screenshot, scripting, DOM, and input APIs;
 - a native-messaging adapter that securely relays to the locally installed official OpenAI extension host;
@@ -20,14 +20,14 @@ The original OpenAI sidebar and background application are retained. The compati
 
 ## Verified parity
 
-The port has been exercised against the real signed-in OpenAI sidebar in Zen, not only against mocks.
+The port has been exercised against the real signed-in OpenAI sidebar in Zen Browser, not only against mocks.
 
 The inherited July 27-31 ChatGPT extension features are also present in the
-Firefox/Zen build. The packaged application code is byte-for-byte identical to
+Firefox and Zen Browser build. The packaged application code is byte-for-byte identical to
 the current `1.2.27236.6274` extension installed in Helium for these paths; the
 port changes only the browser compatibility and packaging layers.
 
-| ChatGPT browser feature | Firefox/Zen support |
+| ChatGPT browser feature | Firefox and Zen Browser support |
 | --- | --- |
 | Mention any open tab as chat context | Pass — the `chatgpt.com` bridge and filtered tab provider are retained |
 | Send highlighted page text to ChatGPT | Pass — selection text is forwarded into the sidebar invocation |
@@ -119,10 +119,10 @@ The OpenAI native extension host must already be installed by ChatGPT/Codex tool
    ./scripts/register-native-host.sh
    ```
 
-2. In Zen or Firefox, open `about:debugging#/runtime/this-firefox`.
+2. In Zen Browser or Firefox, open `about:debugging#/runtime/this-firefox`.
 3. Select **Load Temporary Add-on**, then choose `extension/manifest.json`.
 4. Open the Codex computer-use sidebar from the toolbar button or its configured shortcut.
-5. If prompted, choose **Allow all websites**. Firefox requires this host access before Codex can continue controlling a page after navigation or in a newly opened tab. You can revoke it later from **Add-ons and themes → Codex Computer Use for Zen & Fox → Permissions and data**.
+5. If prompted, choose **Allow all websites**. Firefox requires this host access before Codex can continue controlling a page after navigation or in a newly opened tab. You can revoke it later from **Add-ons and themes → Codex Computer Use for Firefox and Zen Browser → Permissions and data**.
 6. Start a Codex computer-use task. Page execution uses Firefox's standard `scripting.executeScript` API; the add-on does not request the user-script-manager-only `userScripts` permission.
 
 Temporary add-ons are removed when the browser exits. Permanent installation requires Mozilla signing while retaining the Gecko ID `codex-computer-use-firefox-zen@sunkenintime`.

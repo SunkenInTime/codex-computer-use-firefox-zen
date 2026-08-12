@@ -16,7 +16,7 @@ Git tag.
 
 ## 1.4.5 - 2026-08-11
 
-- Advertised an explicit `Codex Firefox Bridge (Firefox/Zen)` browser name and
+- Advertised an explicit `Codex Firefox Bridge (Firefox and Zen Browser)` browser name and
   structured Firefox-versus-Chrome-compatibility metadata to browser-control
   clients, so diagnostics can identify the real browser without changing the
   Chrome-compatible transport contract.
@@ -25,7 +25,7 @@ Git tag.
   navigation or new-tab transition.
 - Replaced Firefox's raw missing-host-permission failure with actionable recovery
   guidance when website access is revoked while Codex is running.
-- Added a `tabs.captureVisibleTab` fallback for Zen builds that do not expose
+- Added a `tabs.captureVisibleTab` fallback for Zen Browser builds that do not expose
   Firefox's nominal `tabs.captureTab` API.
 
 ## 1.4.4 - 2026-08-03
@@ -44,7 +44,7 @@ Git tag.
 
 ## 1.4.3 - 2026-08-02
 
-- Published the Firefox/Zen sidebar-open repair together with its matching
+- Published the Firefox and Zen Browser sidebar-open repair together with its matching
   native companion, npm installer, and platform installers.
 - Fixed current Codex app-server startup by providing the bundled runtime paths
   and a temporary fallback v2 native-host registration when necessary.
@@ -55,7 +55,7 @@ Git tag.
 
 ## 1.4.2 - 2026-07-25
 
-- Fixed Firefox and Zen sidebar-open tracking when the sidebar is opened from
+- Fixed Firefox and Zen Browser sidebar-open tracking when the sidebar is opened from
   the browser's native **View > Sidebar** UI.
 - Made a verified extension-sidepanel startup request authoritative for its
   current window, so the local app server starts without requiring a synthetic
