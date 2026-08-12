@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Codex Computer Use for Firefox",
   "description": "Bring Codex computer use and its signed-in sidebar to Firefox and Zen Browser.",
-  "version": "1.4.6",
+  "version": "1.4.7",
   "icons": {
     "16": "images/firefox-zen-icon16.png",
     "24": "images/firefox-zen-icon24.png",

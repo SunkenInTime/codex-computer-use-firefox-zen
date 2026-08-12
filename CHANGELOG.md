@@ -6,9 +6,16 @@ Git tag.
 
 ## Unreleased
 
+## 1.4.7 - 2026-08-12
+
 - Made accessibility inspection, DOM snapshots, element geometry, pointer,
   keyboard, text, and scroll operations work on strict-CSP sites such as
   ChatGPT and Expedia without evaluating dynamically generated page scripts.
+- Added native bridge-version reporting and a visible mismatch warning so stale
+  Firefox/Zen extensions and companion installs explain exactly which piece
+  needs updating.
+- Improved the one-time setup page and README with clearer signed-extension,
+  platform-installer, npm, recovery, and troubleshooting guidance.
 
 ## 1.4.6 - 2026-08-12
 
