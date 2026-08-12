@@ -10,8 +10,10 @@ import {
   HOST_NAME,
   assertSafeInstallDirectory,
   checksumAsset,
+  downloadWithRetry,
   expectedChecksum,
   installLocations,
+  isInstalledBridgeBinary,
   nativeManifest,
   platformAsset,
   readInstalledManifest,
@@ -24,17 +26,6 @@ const packageJson = JSON.parse(
 );
 const version = packageJson.version;
 const command = process.argv[2] ?? "help";
-
-async function download(url) {
-  const response = await fetch(url, {
-    headers: { "user-agent": `codex-firefox-bridge/${version}` },
-    redirect: "follow"
-  });
-  if (!response.ok) {
-    throw new Error(`Download failed (${response.status}): ${url}`);
-  }
-  return Buffer.from(await response.arrayBuffer());
-}
 
 function writeManifest(manifestPath, binaryPath) {
   fs.mkdirSync(path.dirname(manifestPath), { recursive: true });
@@ -70,8 +61,12 @@ async function install() {
   } else {
     const base = releaseBase(version);
     const [downloadedBinary, checksums] = await Promise.all([
-      download(`${base}/${assetName}`),
-      download(`${base}/${checksumAsset(version)}`)
+      downloadWithRetry(`${base}/${assetName}`, {
+        headers: { "user-agent": `codex-firefox-bridge/${version}` }
+      }),
+      downloadWithRetry(`${base}/${checksumAsset(version)}`, {
+        headers: { "user-agent": `codex-firefox-bridge/${version}` }
+      })
     ]);
     const expected = expectedChecksum(checksums.toString("utf8"), assetName);
     const actual = crypto.createHash("sha256").update(downloadedBinary).digest("hex");
@@ -123,6 +118,46 @@ function doctor() {
   console.log(diagnostic);
 }
 
+function stopWindowsBridgeProcesses(directory) {
+  let output;
+  try {
+    output = execFileSync(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        "Get-CimInstance Win32_Process | " +
+          "Where-Object { $_.Name -like 'codex-firefox-bridge-*.exe' } | " +
+          "Select-Object ProcessId,ExecutablePath | ConvertTo-Json -Compress"
+      ],
+      { encoding: "utf8", timeout: 15_000 }
+    ).trim();
+  } catch {
+    // Removing an idle installation does not require process discovery. If a
+    // bridge is still active, the final directory removal reports the failure.
+    return;
+  }
+  if (!output) {
+    return;
+  }
+  const parsed = JSON.parse(output);
+  const processes = Array.isArray(parsed) ? parsed : [parsed];
+  for (const processInfo of processes) {
+    if (
+      !Number.isInteger(processInfo.ProcessId) ||
+      !isInstalledBridgeBinary(processInfo.ExecutablePath, directory, "win32")
+    ) {
+      continue;
+    }
+    execFileSync(
+      "taskkill",
+      ["/PID", String(processInfo.ProcessId), "/T", "/F"],
+      { stdio: "ignore", timeout: 15_000 }
+    );
+  }
+}
+
 function uninstall() {
   const locations = installLocations();
   const directory = assertSafeInstallDirectory(locations.directory);
@@ -144,6 +179,9 @@ function uninstall() {
         `Refusing to remove an unfamiliar native-host manifest: ${error.message}`
       );
     }
+  }
+  if (process.platform === "win32") {
+    stopWindowsBridgeProcesses(directory);
   }
   fs.rmSync(directory, { recursive: true, force: true });
   console.log("Removed Codex Firefox Bridge.");

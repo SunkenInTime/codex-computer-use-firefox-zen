@@ -4,6 +4,13 @@ This project follows semantic versioning. The Firefox add-on and native companio
 always share one version and are released from a matching `vMAJOR.MINOR.PATCH`
 Git tag.
 
+## Unreleased
+
+- Fixed Windows companion removal when Firefox or Zen left an installed bridge
+  process running after the browser exited.
+- Retried transient network and GitHub server failures while downloading npm
+  installer assets.
+
 ## 1.4.5 - 2026-08-11
 
 - Advertised an explicit `Codex Firefox Bridge (Firefox/Zen)` browser name and
