@@ -9,6 +9,43 @@
   const OFFICIAL_CHROME_EXTENSION_ID = "hehggadaopoacecdllhhajmbjkdcmajg";
   const FIREFOX_BRIDGE_DISPLAY_NAME = "Codex Firefox Bridge (Firefox and Zen Browser)";
   const BINDING_MESSAGE_SOURCE = "chatgpt-firefox-cdp";
+  const COMPANION_VERSION_FIELD = "_firefoxBridgeVersion";
+  let bridgeVersionMismatchDetected = false;
+
+  function companionPageUrl(parameters = {}) {
+    const url = new URL(firefox.runtime.getURL("companion-required.html"));
+    for (const [key, value] of Object.entries(parameters)) {
+      url.searchParams.set(key, value);
+    }
+    return url.href;
+  }
+
+  function reportBridgeVersion(bridgeVersion) {
+    const extensionVersion = firefox.runtime.getManifest().version;
+    bridgeVersionMismatchDetected = bridgeVersion !== extensionVersion;
+    if (!bridgeVersionMismatchDetected) {
+      firefox.action.setBadgeText({ text: "" }).catch(() => {});
+      return;
+    }
+
+    firefox.action.setBadgeBackgroundColor({ color: "#b91c1c" }).catch(() => {});
+    firefox.action.setBadgeText({ text: "SYNC" }).catch(() => {});
+    const storageKey = `companionVersionMismatchPromptShown:${extensionVersion}:${bridgeVersion}`;
+    firefox.storage.local.get(storageKey).then((stored) => {
+      if (stored[storageKey]) {
+        return;
+      }
+      return firefox.storage.local
+        .set({ [storageKey]: true })
+        .then(() => firefox.tabs.create({
+          url: companionPageUrl({
+            bridgeVersion,
+            extensionVersion,
+            reason: "version-mismatch",
+          }),
+        }));
+    }).catch(() => {});
+  }
 
   const nativeFetch = typeof globalThis.fetch === "function"
     ? globalThis.fetch.bind(globalThis)
@@ -119,12 +156,15 @@
 
   function createNativePortProxy(port) {
     const getInfoRequestIds = new Set();
+    const getInfoBridgeVersions = new Map();
     const listenerWrappers = new WeakMap();
     let receivedNativeMessage = false;
 
     port.onMessage.addListener(() => {
       receivedNativeMessage = true;
-      firefox.action.setBadgeText({ text: "" }).catch(() => {});
+      if (!bridgeVersionMismatchDetected) {
+        firefox.action.setBadgeText({ text: "" }).catch(() => {});
+      }
     });
     port.onDisconnect.addListener(() => {
       if (receivedNativeMessage) {
@@ -151,7 +191,14 @@
       addListener(listener) {
         const wrapped = (message) => {
           if (message?.method === "getInfo" && message.id != null) {
-            getInfoRequestIds.add(String(message.id));
+            const requestId = String(message.id);
+            getInfoRequestIds.add(requestId);
+            getInfoBridgeVersions.set(
+              requestId,
+              typeof message[COMPANION_VERSION_FIELD] === "string"
+                ? message[COMPANION_VERSION_FIELD]
+                : "unknown",
+            );
           }
           listener(message);
         };
@@ -198,6 +245,8 @@
 
             const responseId = message?.id == null ? null : String(message.id);
             if (responseId != null && getInfoRequestIds.delete(responseId) && message?.result) {
+              const bridgeVersion = getInfoBridgeVersions.get(responseId) ?? "unknown";
+              getInfoBridgeVersions.delete(responseId);
               outgoing = {
                 ...message,
                 result: {
@@ -207,13 +256,14 @@
                     ...message.result.metadata,
                     actualBrowserFamily: "firefox",
                     bridgeName: "codex-firefox-bridge",
-                    bridgeVersion: firefox.runtime.getManifest().version,
+                    bridgeVersion,
                     compatibilityFamily: "chrome",
                     extensionId: OFFICIAL_CHROME_EXTENSION_ID,
                     geckoExtensionId: firefox.runtime.id,
                   },
                 },
               };
+              reportBridgeVersion(bridgeVersion);
             }
 
             target.postMessage(outgoing);

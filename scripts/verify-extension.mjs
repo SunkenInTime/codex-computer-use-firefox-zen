@@ -58,6 +58,8 @@ for (const setupFile of ["companion-required.html", "companion-required.css", "c
 new vm.Script(read("extension/companion-required.js"), { filename: "companion-required.js" });
 const setupHtml = read("extension/companion-required.html");
 assert(setupHtml.includes("codex-firefox-bridge@"), "The npm installation path is missing from setup.");
+assert(setupHtml.includes("https://addons.mozilla.org/firefox/addon/codex-computer-use-for-zen/"), "The signed Firefox extension update path is missing from setup.");
+assert(setupHtml.includes('id="version-status"'), "The setup page cannot show installed version details.");
 assert(setupHtml.includes("Why is this needed?"), "The setup page must explain why the companion is required.");
 for (const size of ["16", "24", "32", "48", "64", "96", "128"]) {
   assert(size in manifest.icons, `Missing ${size}px icon declaration.`);
@@ -73,6 +75,7 @@ for (const match of sidebarHtml.matchAll(/(?:src|href)="\.\/([^"?#]+)"/gu)) {
 
 const compatibilitySource = read("extension/firefox-compat.js");
 assert(compatibilitySource.includes("companionSetupPromptShown:"), "Missing one-time companion setup guidance.");
+assert(compatibilitySource.includes("companionVersionMismatchPromptShown:"), "Missing bridge version mismatch guidance.");
 const coreCdpMethods = [
   "DOM.describeNode",
   "DOM.getBoxModel",

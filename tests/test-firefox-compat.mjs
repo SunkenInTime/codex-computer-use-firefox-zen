@@ -31,6 +31,7 @@ const executedFaviconTargets = [];
 const createdTabs = [];
 const fetchedUrls = [];
 const storedValues = {};
+const badgeTexts = [];
 let allWebsiteAccessGranted = true;
 let captureVisibleTabCalls = [];
 let targetTabActive = true;
@@ -52,7 +53,7 @@ const browser = {
   },
   action: {
     async setBadgeBackgroundColor() {},
-    async setBadgeText() {},
+    async setBadgeText(details) { badgeTexts.push(details.text); },
   },
   permissions: {
     async contains(details) {
@@ -167,7 +168,11 @@ assert.equal(
 
 const identityPort = context.chrome.runtime.connectNative("com.openai.codexextension");
 identityPort.onMessage.addListener(() => {});
-nativePort.onMessage.emit({ id: "bridge-info", method: "getInfo" });
+nativePort.onMessage.emit({
+  _firefoxBridgeVersion: "test",
+  id: "bridge-info",
+  method: "getInfo",
+});
 identityPort.postMessage({
   id: "bridge-info",
   result: {
@@ -184,6 +189,35 @@ assert.equal(bridgeIdentity.metadata.compatibilityFamily, "chrome");
 assert.equal(bridgeIdentity.metadata.extensionId, "hehggadaopoacecdllhhajmbjkdcmajg");
 assert.equal(bridgeIdentity.metadata.geckoExtensionId, "codex-computer-use-firefox-zen@sunkenintime");
 assert.equal(bridgeIdentity.metadata.extensionInstanceId, "test-instance");
+assert.equal(createdTabs.length, 0, "Matching bridge and extension versions must not show update guidance.");
+
+nativePort.onMessage.emit({
+  _firefoxBridgeVersion: "0.9.0",
+  id: "mismatched-bridge-info",
+  method: "getInfo",
+});
+identityPort.postMessage({
+  id: "mismatched-bridge-info",
+  result: { name: "Chrome", metadata: {} },
+});
+await new Promise((resolve) => setTimeout(resolve, 0));
+assert.equal(nativePostedMessages.at(-1).result.metadata.bridgeVersion, "0.9.0");
+assert.equal(badgeTexts.at(-1), "SYNC", "A version mismatch must remain visible on the toolbar action.");
+assert.match(createdTabs.at(-1).url, /companion-required\.html\?/u);
+assert.match(createdTabs.at(-1).url, /reason=version-mismatch/u);
+assert.match(createdTabs.at(-1).url, /bridgeVersion=0\.9\.0/u);
+assert.match(createdTabs.at(-1).url, /extensionVersion=test/u);
+createdTabs.length = 0;
+
+nativePort.onMessage.emit({ id: "legacy-bridge-info", method: "getInfo" });
+identityPort.postMessage({
+  id: "legacy-bridge-info",
+  result: { name: "Chrome", metadata: {} },
+});
+await new Promise((resolve) => setTimeout(resolve, 0));
+assert.equal(nativePostedMessages.at(-1).result.metadata.bridgeVersion, "unknown");
+assert.match(createdTabs.at(-1).url, /bridgeVersion=unknown/u, "A pre-version-reporting bridge must be treated as outdated.");
+createdTabs.length = 0;
 
 const faviconResponse = await context.fetch("moz-extension://test/_favicon/?pageUrl=https%3A%2F%2Ftop.test%2F&size=32");
 assert.equal(faviconResponse.ok, true);
