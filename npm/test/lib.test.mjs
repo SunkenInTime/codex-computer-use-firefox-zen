@@ -88,6 +88,48 @@ test("retries transient release-download failures", async () => {
   assert.equal(calls, 2);
 });
 
+test("retries release downloads after network errors", async () => {
+  let calls = 0;
+  const value = await downloadWithRetry("https://example.test/bridge", {
+    attempts: 3,
+    fetchImpl: async () => {
+      calls += 1;
+      if (calls === 1) {
+        throw new TypeError("fetch failed");
+      }
+      return {
+        ok: true,
+        status: 200,
+        arrayBuffer: async () => Buffer.from("bridge")
+      };
+    },
+    sleep: async () => {}
+  });
+  assert.equal(value.toString("utf8"), "bridge");
+  assert.equal(calls, 2);
+});
+
+test("retries rate-limited release downloads", async () => {
+  let calls = 0;
+  const value = await downloadWithRetry("https://example.test/bridge", {
+    attempts: 3,
+    fetchImpl: async () => {
+      calls += 1;
+      if (calls === 1) {
+        return { ok: false, status: 429 };
+      }
+      return {
+        ok: true,
+        status: 200,
+        arrayBuffer: async () => Buffer.from("bridge")
+      };
+    },
+    sleep: async () => {}
+  });
+  assert.equal(value.toString("utf8"), "bridge");
+  assert.equal(calls, 2);
+});
+
 test("does not retry permanent release-download failures", async () => {
   let calls = 0;
   await assert.rejects(

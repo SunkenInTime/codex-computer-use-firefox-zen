@@ -150,11 +150,16 @@ function stopWindowsBridgeProcesses(directory) {
     ) {
       continue;
     }
-    execFileSync(
-      "taskkill",
-      ["/PID", String(processInfo.ProcessId), "/T", "/F"],
-      { stdio: "ignore", timeout: 15_000 }
-    );
+    try {
+      execFileSync(
+        "taskkill",
+        ["/PID", String(processInfo.ProcessId), "/T", "/F"],
+        { stdio: "ignore", timeout: 15_000 }
+      );
+    } catch {
+      // The process may have exited after discovery. Directory removal below
+      // reports any process that still holds an installation file.
+    }
   }
 }
 
