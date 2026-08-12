@@ -583,6 +583,341 @@
     }
   }
 
+  function runCspSafePageOperation(operation, payload = {}) {
+    const state = globalThis.__chatgptFirefoxCdpState ??= {
+      nextObjectId: 1,
+      nextNodeId: 2,
+      objects: new Map(),
+      objectGroups: new Map(),
+      nodes: new Map([[1, document]]),
+      nodeIds: new WeakMap([[document, 1]]),
+      nextSearchId: 1,
+      searchResults: new Map(),
+      nextScriptId: 1,
+      compiledScripts: new Map(),
+      pointer: { x: 0, y: 0, element: null },
+    };
+    const nodeId = (node) => {
+      if (node == null || (typeof node !== "object" && typeof node !== "function")) return 0;
+      let id = state.nodeIds.get(node);
+      if (id == null) {
+        id = state.nextNodeId++;
+        state.nodeIds.set(node, id);
+        state.nodes.set(id, node);
+      }
+      return id;
+    };
+    const nodeFromPayload = () => {
+      const objectId = payload.objectId ?? null;
+      const id = payload.nodeId ?? payload.backendNodeId ?? 0;
+      return objectId ? state.objects.get(objectId) : state.nodes.get(id);
+    };
+    const editableTarget = (target) => target?.closest?.('input,textarea,select,button,a[href],[contenteditable="true"],[tabindex]') ?? target;
+
+    switch (operation) {
+      case "accessibilityTree": {
+        const root = payload.rootBackendNodeId == null
+          ? document.documentElement
+          : (state.nodes.get(payload.rootBackendNodeId) ?? document.documentElement);
+        const elements = [root, ...(root.querySelectorAll?.("*") ?? [])]
+          .filter((element) => element instanceof Element);
+        const ids = new Map(elements.map((element) => [element, `firefox-ax-${nodeId(element)}`]));
+        const roleFor = (element) => element.getAttribute?.("role") || ({
+          A: "link", BUTTON: "button", INPUT: element.type === "checkbox" ? "checkbox" : "textbox",
+          TEXTAREA: "textbox", SELECT: "combobox", IMG: "img", H1: "heading", H2: "heading",
+          H3: "heading", MAIN: "main", NAV: "navigation", FORM: "form",
+        }[element.tagName] ?? (element.isContentEditable ? "textbox" : "generic"));
+        const nameFor = (element) => element.getAttribute?.("aria-label")
+          || element.getAttribute?.("alt")
+          || element.getAttribute?.("title")
+          || element.getAttribute?.("placeholder")
+          || element.labels?.[0]?.textContent?.trim()
+          || element.textContent?.trim()?.slice(0, 500)
+          || "";
+        return {
+          nodes: elements.map((element) => {
+            const backendDOMNodeId = nodeId(element);
+            return {
+              nodeId: ids.get(element),
+              ignored: false,
+              role: { type: "role", value: roleFor(element) },
+              name: { type: "computedString", value: nameFor(element) },
+              description: { type: "computedString", value: element.getAttribute?.("aria-description") ?? "" },
+              value: { type: "computedString", value: element.value ?? element.textContent ?? "" },
+              properties: [],
+              childIds: [...element.children].map((child) => ids.get(child)).filter(Boolean),
+              backendDOMNodeId,
+              frameId: payload.frameId,
+            };
+          }),
+        };
+      }
+      case "captureDomSnapshot": {
+        const strings = [];
+        const stringIndexes = new Map();
+        const stringIndex = (value) => {
+          const text = String(value ?? "");
+          let index = stringIndexes.get(text);
+          if (index == null) {
+            index = strings.length;
+            strings.push(text);
+            stringIndexes.set(text, index);
+          }
+          return index;
+        };
+        const nodes = {
+          parentIndex: [], nodeType: [], nodeName: [], nodeValue: [], backendNodeId: [], attributes: [],
+        };
+        const layout = { nodeIndex: [], styles: [], bounds: [], text: [], stackingContexts: { index: [] } };
+        const walk = (node, parentIndex) => {
+          const index = nodes.nodeType.length;
+          nodes.parentIndex.push(parentIndex);
+          nodes.nodeType.push(node.nodeType);
+          nodes.nodeName.push(stringIndex(node.nodeName));
+          nodes.nodeValue.push(stringIndex(node.nodeValue ?? ""));
+          nodes.backendNodeId.push(nodeId(node));
+          nodes.attributes.push(node.nodeType === Node.ELEMENT_NODE
+            ? [...node.attributes].flatMap((attribute) => [stringIndex(attribute.name), stringIndex(attribute.value)])
+            : []);
+          if (node instanceof Element || node.nodeType === Node.TEXT_NODE) {
+            let bounds;
+            if (node instanceof Element) {
+              const box = node.getBoundingClientRect();
+              bounds = [box.left, box.top, box.width, box.height];
+            } else {
+              const range = document.createRange();
+              range.selectNode(node);
+              const box = range.getBoundingClientRect();
+              bounds = [box.left, box.top, box.width, box.height];
+            }
+            layout.nodeIndex.push(index);
+            layout.styles.push([]);
+            layout.bounds.push(bounds);
+            layout.text.push(stringIndex(node.textContent ?? ""));
+          }
+          for (const child of node.childNodes ?? []) walk(child, index);
+        };
+        walk(document, -1);
+        return {
+          strings,
+          documents: [{
+            documentURL: stringIndex(location.href), title: stringIndex(document.title), baseURL: stringIndex(document.baseURI),
+            contentLanguage: stringIndex(document.documentElement.lang), encodingName: stringIndex(document.characterSet),
+            publicId: stringIndex(document.doctype?.publicId ?? ""), systemId: stringIndex(document.doctype?.systemId ?? ""),
+            frameId: stringIndex(payload.frameId), nodes, layout,
+            textBoxes: { layoutIndex: [], bounds: [], start: [], length: [] },
+          }],
+        };
+      }
+      case "boxModel": {
+        const node = nodeFromPayload();
+        if (!(node instanceof Element)) throw new Error("DOM element not found");
+        const rect = node.getBoundingClientRect();
+        const quad = [rect.left, rect.top, rect.right, rect.top, rect.right, rect.bottom, rect.left, rect.bottom];
+        return { model: { content: quad, padding: quad, border: quad, margin: quad, width: rect.width, height: rect.height, shapeOutside: { bounds: quad, shape: [], marginShape: [] } } };
+      }
+      case "scrollIntoView": {
+        const node = nodeFromPayload();
+        if (!(node instanceof Element)) throw new Error("DOM element not found");
+        node.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
+        return {};
+      }
+      case "nodeForLocation": {
+        const node = document.elementFromPoint(Number(payload.x) || 0, Number(payload.y) || 0);
+        const id = nodeId(node);
+        return { backendNodeId: id, nodeId: id, frameId: payload.frameId };
+      }
+      case "focusedState": {
+        const active = document.activeElement;
+        return {
+          focused: document.hasFocus(),
+          meaningful: active != null && active !== document.body && active !== document.documentElement,
+          frameOwner: active instanceof HTMLIFrameElement || active instanceof HTMLFrameElement,
+        };
+      }
+      case "hitTestFrame": {
+        const element = document.elementFromPoint(Number(payload.x) || 0, Number(payload.y) || 0);
+        if (!(element instanceof HTMLIFrameElement || element instanceof HTMLFrameElement)) return null;
+        const owners = [...document.querySelectorAll("iframe,frame")];
+        const ownerIndex = owners.indexOf(element);
+        const ownerUrl = (() => {
+          try {
+            const source = element.hasAttribute("srcdoc") ? "about:srcdoc" : (element.getAttribute("src") || "about:blank");
+            return new URL(source, document.baseURI).href;
+          } catch { return ""; }
+        })();
+        const sameUrlOwnerIndex = owners.slice(0, ownerIndex).filter((owner) => {
+          try {
+            const source = owner.hasAttribute("srcdoc") ? "about:srcdoc" : (owner.getAttribute("src") || "about:blank");
+            return new URL(source, document.baseURI).href === ownerUrl;
+          } catch { return false; }
+        }).length;
+        const rect = element.getBoundingClientRect();
+        return {
+          ownerIndex, sameUrlOwnerIndex, resolvedFrameUrl: ownerUrl,
+          left: rect.left + element.clientLeft, top: rect.top + element.clientTop,
+        };
+      }
+      case "dispatchMouse": {
+        const event = payload.event ?? {};
+        const x = Number(event.x ?? state.pointer.x);
+        const y = Number(event.y ?? state.pointer.y);
+        state.pointer.x = x;
+        state.pointer.y = y;
+        const target = document.elementFromPoint(x, y) ?? document.body ?? document.documentElement;
+        const interactive = editableTarget(target);
+        const fileInput = interactive instanceof HTMLInputElement && interactive.type === "file" ? interactive : null;
+        state.pointer.element = target;
+        const buttonNames = ["left", "middle", "right", "back", "forward"];
+        const button = Math.max(0, buttonNames.indexOf(event.button));
+        const buttons = Number(event.buttons ?? (event.type === "mouseReleased" ? 0 : 1 << button));
+        const common = { bubbles: true, cancelable: true, composed: true, clientX: x, clientY: y, screenX: x, screenY: y, button, buttons, detail: event.clickCount ?? 1 };
+        if (event.type === "mouseWheel") {
+          target.dispatchEvent(new WheelEvent("wheel", { ...common, deltaX: event.deltaX ?? 0, deltaY: event.deltaY ?? 0, deltaMode: WheelEvent.DOM_DELTA_PIXEL }));
+          window.scrollBy({ left: event.deltaX ?? 0, top: event.deltaY ?? 0, behavior: "instant" });
+        } else if (event.type === "mouseMoved") {
+          target.dispatchEvent(new PointerEvent("pointermove", { ...common, pointerId: 1, pointerType: "mouse", isPrimary: true }));
+          target.dispatchEvent(new MouseEvent("mousemove", common));
+          const drag = state.drag;
+          if (drag != null && (buttons & 1) !== 0) {
+            const dragInit = { ...common, dataTransfer: drag.dataTransfer };
+            if (!drag.started) drag.started = drag.source.dispatchEvent(new DragEvent("dragstart", dragInit));
+            if (drag.started) {
+              drag.source.dispatchEvent(new DragEvent("drag", dragInit));
+              if (drag.target !== target) {
+                drag.target?.dispatchEvent(new DragEvent("dragleave", dragInit));
+                target.dispatchEvent(new DragEvent("dragenter", dragInit));
+                drag.target = target;
+              }
+              target.dispatchEvent(new DragEvent("dragover", dragInit));
+            }
+          }
+        } else if (event.type === "mousePressed") {
+          target.dispatchEvent(new PointerEvent("pointerdown", { ...common, pointerId: 1, pointerType: "mouse", isPrimary: true }));
+          target.dispatchEvent(new MouseEvent("mousedown", common));
+          interactive.focus?.({ preventScroll: true });
+          if (event.button === "left") {
+            const source = target.closest?.('[draggable="true"]') ?? (target.draggable ? target : null);
+            state.drag = source == null ? null : { source, target: source, dataTransfer: new DataTransfer(), started: false };
+          }
+        } else if (event.type === "mouseReleased") {
+          target.dispatchEvent(new PointerEvent("pointerup", { ...common, pointerId: 1, pointerType: "mouse", isPrimary: true }));
+          target.dispatchEvent(new MouseEvent("mouseup", common));
+          const drag = state.drag;
+          const completedDrag = drag?.started === true;
+          if (completedDrag) {
+            const dragInit = { ...common, dataTransfer: drag.dataTransfer };
+            target.dispatchEvent(new DragEvent("dragover", dragInit));
+            target.dispatchEvent(new DragEvent("drop", dragInit));
+            drag.source.dispatchEvent(new DragEvent("dragend", dragInit));
+          }
+          state.drag = null;
+          if (completedDrag) {
+            // A completed drag must not also activate the drop target as a click.
+          } else if (event.button === "right") {
+            target.dispatchEvent(new MouseEvent("contextmenu", common));
+          } else if (!(fileInput && payload.interceptFileChooser === true)) {
+            interactive.click?.();
+            if ((event.clickCount ?? 1) >= 2) interactive.dispatchEvent(new MouseEvent("dblclick", common));
+          }
+        }
+        return event.type === "mouseReleased" && fileInput
+          ? { fileChooser: { backendNodeId: nodeId(fileInput), mode: fileInput.multiple ? "selectMultiple" : "selectSingle" } }
+          : {};
+      }
+      case "dispatchKeyboard": {
+        const event = payload.event ?? {};
+        const target = document.activeElement ?? document.body;
+        const type = event.type === "keyUp" ? "keyup" : event.type === "char" ? "keypress" : "keydown";
+        const key = event.key ?? event.text ?? event.code ?? "";
+        const modifiers = Number(event.modifiers ?? 0);
+        const init = { bubbles: true, cancelable: true, composed: true, key, code: event.code ?? "", repeat: event.autoRepeat === true,
+          altKey: Boolean(modifiers & 1), ctrlKey: Boolean(modifiers & 2), metaKey: Boolean(modifiers & 4), shiftKey: Boolean(modifiers & 8) };
+        const allowed = target.dispatchEvent(new KeyboardEvent(type, init));
+        if (type === "keydown" && allowed) {
+          const editable = target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement;
+          const text = event.text ?? (event.type === "char" ? key : "");
+          if (text && editable && !init.ctrlKey && !init.metaKey) {
+            const start = target.selectionStart ?? target.value.length;
+            const end = target.selectionEnd ?? start;
+            target.setRangeText(text, start, end, "end");
+            target.dispatchEvent(new InputEvent("input", { bubbles: true, composed: true, data: text, inputType: "insertText" }));
+          } else if (text && target.isContentEditable && !init.ctrlKey && !init.metaKey) {
+            document.execCommand("insertText", false, text);
+          } else if (key === "Backspace" && editable) {
+            const start = target.selectionStart ?? 0;
+            const end = target.selectionEnd ?? start;
+            const from = start === end ? Math.max(0, start - 1) : start;
+            target.setRangeText("", from, end, "end");
+            target.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "deleteContentBackward" }));
+          } else if (key === "Delete" && editable) {
+            const start = target.selectionStart ?? 0;
+            const end = target.selectionEnd ?? start;
+            const to = start === end ? Math.min(target.value.length, end + 1) : end;
+            target.setRangeText("", start, to, "start");
+            target.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "deleteContentForward" }));
+          } else if (key === "Enter") {
+            if (target instanceof HTMLTextAreaElement) {
+              const start = target.selectionStart ?? target.value.length;
+              const end = target.selectionEnd ?? start;
+              target.setRangeText("\n", start, end, "end");
+              target.dispatchEvent(new InputEvent("input", { bubbles: true, data: "\n", inputType: "insertLineBreak" }));
+            } else if (target instanceof HTMLButtonElement || target instanceof HTMLAnchorElement) {
+              target.click();
+            } else if (target instanceof HTMLInputElement && target.form) {
+              target.form.requestSubmit?.();
+            }
+          } else if (key === "Tab") {
+            const candidates = [...document.querySelectorAll('a[href],button,input,select,textarea,[contenteditable="true"],[tabindex]:not([tabindex="-1"])')]
+              .filter((element) => !element.disabled && element.getClientRects().length > 0);
+            const index = candidates.indexOf(target);
+            const next = candidates[(index + (init.shiftKey ? -1 : 1) + candidates.length) % candidates.length];
+            next?.focus();
+          } else if ((init.ctrlKey || init.metaKey) && key.toLowerCase() === "a" && editable) {
+            target.select();
+          }
+        }
+        return {};
+      }
+      case "insertText": {
+        const target = document.activeElement ?? document.body;
+        const text = String(payload.text ?? "");
+        if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+          const start = target.selectionStart ?? target.value.length;
+          const end = target.selectionEnd ?? start;
+          target.setRangeText(text, start, end, "end");
+          target.dispatchEvent(new InputEvent("input", { bubbles: true, composed: true, data: text, inputType: "insertText" }));
+        } else if (target?.isContentEditable) {
+          document.execCommand("insertText", false, text);
+        }
+        return {};
+      }
+      case "synthesizeScroll":
+        window.scrollBy({ left: -(Number(payload.xDistance) || 0), top: -(Number(payload.yDistance) || 0), behavior: "instant" });
+        window.dispatchEvent(new Event("scroll", { bubbles: true }));
+        return {};
+      default:
+        throw new Error(`Unsupported CSP-safe Firefox page operation: ${operation}`);
+    }
+  }
+
+  async function executeCspSafePageOperation(tabId, operation, payload = {}, { frameId } = {}) {
+    await requirePageScriptExecution();
+    const target = { tabId };
+    if (Number.isInteger(frameId)) target.frameIds = [frameId];
+    const results = await firefox.scripting.executeScript({
+      target,
+      world: "MAIN",
+      injectImmediately: true,
+      func: runCspSafePageOperation,
+      args: [operation, payload],
+    });
+    const result = results.find((candidate) => candidate.frameId === (frameId ?? 0)) ?? results[0];
+    if (result == null) throw new Error("Firefox did not return a CSP-safe page-operation result.");
+    if (result.error) throw new Error(result.error);
+    return exposePageReferences(result.result, tabId, frameId ?? 0);
+  }
+
   function stripSourceUrl(source) {
     return String(source ?? "")
       .replace(/^\s*\/\/[#@]\s*sourceURL=.*$/gmu, "")
@@ -1447,29 +1782,10 @@
   }
 
   async function getAccessibilityTree(tabId, frameId = 0, rootBackendNodeId = null) {
-    return executeUserScript(
-      tabId,
-      operationScript(`
-        const roleFor = (element) => element.getAttribute?.("role") || ({A:"link",BUTTON:"button",INPUT:element.type==="checkbox"?"checkbox":"textbox",TEXTAREA:"textbox",SELECT:"combobox",IMG:"img",H1:"heading",H2:"heading",H3:"heading",MAIN:"main",NAV:"navigation",FORM:"form"}[element.tagName] ?? "generic");
-        const nameFor = (element) => element.getAttribute?.("aria-label") || element.getAttribute?.("alt") || element.getAttribute?.("title") || element.labels?.[0]?.textContent?.trim() || element.textContent?.trim()?.slice(0,500) || "";
-        const root = ${JSON.stringify(rootBackendNodeId)} == null ? document.documentElement : (__state.nodes.get(${JSON.stringify(rootBackendNodeId)}) ?? document.documentElement);
-        const elements = [root, ...(root.querySelectorAll?.("*") ?? [])].filter((element) => element instanceof Element);
-        const nodeIds = new Map(elements.map((element) => [element, "firefox-ax-" + __nodeId(element)]));
-        const nodes = elements.map((element) => {
-          const backendDOMNodeId = __nodeId(element);
-          const children = [...element.children].map((child) => nodeIds.get(child)).filter(Boolean);
-          const role = roleFor(element);
-          const name = nameFor(element);
-          return {
-            nodeId: nodeIds.get(element), ignored: false, role: {type:"role",value:role}, name: {type:"computedString",value:name},
-            description: {type:"computedString",value:element.getAttribute?.("aria-description")??""}, value: {type:"computedString",value:element.value??""},
-            properties: [], childIds: children, backendDOMNodeId, frameId: ${JSON.stringify(cdpFrameId(tabId, frameId))},
-          };
-        });
-        return { nodes };
-      `),
-      { frameId },
-    );
+    return executeCspSafePageOperation(tabId, "accessibilityTree", {
+      rootBackendNodeId,
+      frameId: cdpFrameId(tabId, frameId),
+    }, { frameId });
   }
 
   async function querySelector(tabId, params, frameId = 0) {
@@ -1580,19 +1896,7 @@
   }
 
   async function getBoxModel(tabId, params, frameId = 0) {
-    return executeUserScript(
-      tabId,
-      operationScript(`
-        const objectId = ${JSON.stringify(params.objectId ?? null)};
-        const id = ${JSON.stringify(params.nodeId ?? params.backendNodeId ?? 0)};
-        const node = objectId ? __state.objects.get(objectId) : __state.nodes.get(id);
-        if (!(node instanceof Element)) throw new Error("DOM element not found");
-        const rect = node.getBoundingClientRect();
-        const quad = [rect.left, rect.top, rect.right, rect.top, rect.right, rect.bottom, rect.left, rect.bottom];
-        return { model: { content: quad, padding: quad, border: quad, margin: quad, width: rect.width, height: rect.height, shapeOutside: { bounds: quad, shape: [], marginShape: [] } } };
-      `),
-      { frameId },
-    );
+    return executeCspSafePageOperation(tabId, "boxModel", params, { frameId });
   }
 
   async function getContentQuads(tabId, params, frameId = 0) {
@@ -1601,31 +1905,15 @@
   }
 
   async function scrollIntoView(tabId, params, frameId = 0) {
-    await executeUserScript(
-      tabId,
-      operationScript(`
-        const objectId = ${JSON.stringify(params.objectId ?? null)};
-        const id = ${JSON.stringify(params.nodeId ?? params.backendNodeId ?? 0)};
-        const node = objectId ? __state.objects.get(objectId) : __state.nodes.get(id);
-        if (!(node instanceof Element)) throw new Error("DOM element not found");
-        node.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
-        return {};
-      `),
-      { frameId },
-    );
+    await executeCspSafePageOperation(tabId, "scrollIntoView", params, { frameId });
     return {};
   }
 
   async function nodeForLocation(tabId, params, frameId = 0) {
-    return executeUserScript(
-      tabId,
-      operationScript(`
-        const node = document.elementFromPoint(${Number(params.x) || 0}, ${Number(params.y) || 0});
-        const nodeId = __nodeId(node);
-        return { backendNodeId: nodeId, nodeId, frameId: ${JSON.stringify(cdpFrameId(tabId, frameId))} };
-      `),
-      { frameId },
-    );
+    return executeCspSafePageOperation(tabId, "nodeForLocation", {
+      ...params,
+      frameId: cdpFrameId(tabId, frameId),
+    }, { frameId });
   }
 
   async function getFrameOwner(tabId, params, fallbackFrameId = 0) {
@@ -1667,66 +1955,10 @@
   }
 
   async function captureFrameDomSnapshot(tabId, params, frameId = 0) {
-    return executeUserScript(
-      tabId,
-      operationScript(`
-        const strings = [];
-        const stringIndexes = new Map();
-        const stringIndex = (value) => {
-          const text = String(value ?? "");
-          let index = stringIndexes.get(text);
-          if (index == null) {
-            index = strings.length;
-            strings.push(text);
-            stringIndexes.set(text, index);
-          }
-          return index;
-        };
-        const nodes = {
-          parentIndex: [], nodeType: [], nodeName: [], nodeValue: [], backendNodeId: [], attributes: [],
-        };
-        const layout = { nodeIndex: [], styles: [], bounds: [], text: [], stackingContexts: { index: [] } };
-        const walk = (node, parentIndex) => {
-          const index = nodes.nodeType.length;
-          nodes.parentIndex.push(parentIndex);
-          nodes.nodeType.push(node.nodeType);
-          nodes.nodeName.push(stringIndex(node.nodeName));
-          nodes.nodeValue.push(stringIndex(node.nodeValue ?? ""));
-          nodes.backendNodeId.push(__nodeId(node));
-          nodes.attributes.push(node.nodeType === Node.ELEMENT_NODE
-            ? [...node.attributes].flatMap((attribute) => [stringIndex(attribute.name), stringIndex(attribute.value)])
-            : []);
-          if (node instanceof Element || node.nodeType === Node.TEXT_NODE) {
-            let bounds;
-            if (node instanceof Element) {
-              const box = node.getBoundingClientRect();
-              bounds = [box.left, box.top, box.width, box.height];
-            } else {
-              const range = document.createRange();
-              range.selectNode(node);
-              const box = range.getBoundingClientRect();
-              bounds = [box.left, box.top, box.width, box.height];
-            }
-            layout.nodeIndex.push(index);
-            layout.styles.push([]);
-            layout.bounds.push(bounds);
-            layout.text.push(stringIndex(node.textContent ?? ""));
-          }
-          for (const child of node.childNodes ?? []) walk(child, index);
-        };
-        walk(document, -1);
-        return {
-          strings,
-          documents: [{
-            documentURL: stringIndex(location.href), title: stringIndex(document.title), baseURL: stringIndex(document.baseURI),
-            contentLanguage: stringIndex(document.documentElement.lang), encodingName: stringIndex(document.characterSet),
-            publicId: stringIndex(document.doctype?.publicId ?? ""), systemId: stringIndex(document.doctype?.systemId ?? ""),
-            frameId: stringIndex(${JSON.stringify(cdpFrameId(tabId, frameId))}), nodes, layout, textBoxes: { layoutIndex: [], bounds: [], start: [], length: [] },
-          }],
-        };
-      `),
-      { frameId },
-    );
+    return executeCspSafePageOperation(tabId, "captureDomSnapshot", {
+      ...params,
+      frameId: cdpFrameId(tabId, frameId),
+    }, { frameId });
   }
 
   async function captureDomSnapshot(tabId, params, frameId = 0) {
@@ -1758,36 +1990,7 @@
 
   async function hitTestFrame(tabId, frameId, x, y, frames, depth = 0) {
     if (depth > 16) return { frameId, x, y };
-    const hit = await executeUserScript(
-      tabId,
-      operationScript(`
-        const x = ${JSON.stringify(x)};
-        const y = ${JSON.stringify(y)};
-        const element = document.elementFromPoint(x, y);
-        if (!(element instanceof HTMLIFrameElement || element instanceof HTMLFrameElement)) return null;
-        const owners = [...document.querySelectorAll("iframe,frame")];
-        const ownerIndex = owners.indexOf(element);
-        const ownerUrl = (() => {
-          try {
-            const source = element.hasAttribute("srcdoc") ? "about:srcdoc" : (element.getAttribute("src") || "about:blank");
-            return new URL(source, document.baseURI).href;
-          } catch { return ""; }
-        })();
-        const sameUrlOwnerIndex = owners.slice(0, ownerIndex).filter((owner) => {
-          try {
-            const source = owner.hasAttribute("srcdoc") ? "about:srcdoc" : (owner.getAttribute("src") || "about:blank");
-            return new URL(source, document.baseURI).href === ownerUrl;
-          } catch { return false; }
-        }).length;
-        const rect = element.getBoundingClientRect();
-        return {
-          ownerIndex, sameUrlOwnerIndex, resolvedFrameUrl: ownerUrl,
-          left: rect.left + element.clientLeft,
-          top: rect.top + element.clientTop,
-        };
-      `),
-      { frameId },
-    ).catch(() => null);
+    const hit = await executeCspSafePageOperation(tabId, "hitTestFrame", { x, y }, { frameId }).catch(() => null);
     if (hit == null) return { frameId, x, y };
     const child = childFrameForOwner(frameId, hit, frames);
     if (child == null) return { frameId, x, y };
@@ -1806,18 +2009,7 @@
     if (!Array.isArray(frames) || frames.length < 2) return frameId;
     const focus = await Promise.all(frames.map(async (frame) => ({
       frame,
-      state: await executeUserScript(
-        tabId,
-        operationScript(`
-          const active = document.activeElement;
-          return {
-            focused: document.hasFocus(),
-            meaningful: active != null && active !== document.body && active !== document.documentElement,
-            frameOwner: active instanceof HTMLIFrameElement || active instanceof HTMLFrameElement,
-          };
-        `),
-        { frameId: frame.frameId },
-      ).catch(() => null),
+      state: await executeCspSafePageOperation(tabId, "focusedState", {}, { frameId: frame.frameId }).catch(() => null),
     })));
     const parentByFrame = new Map(frames.map((frame) => [frame.frameId, frame.parentFrameId]));
     const depthOf = (candidate) => {
@@ -1843,78 +2035,10 @@
     const routed = await routePointToFrame(tabId, frameId, Number(params.x) || 0, Number(params.y) || 0);
     frameId = routed.frameId;
     params = { ...params, x: routed.x, y: routed.y };
-    const result = await executeUserScript(
-      tabId,
-      operationScript(`
-        const event = ${JSON.stringify(params)};
-        const x = Number(event.x ?? __state.pointer.x);
-        const y = Number(event.y ?? __state.pointer.y);
-        __state.pointer.x = x;
-        __state.pointer.y = y;
-        const target = document.elementFromPoint(x, y) ?? document.body ?? document.documentElement;
-        const fileInput = target instanceof HTMLInputElement && target.type === "file" ? target : null;
-        __state.pointer.element = target;
-        const buttonNames = ["left", "middle", "right", "back", "forward"];
-        const button = Math.max(0, buttonNames.indexOf(event.button));
-        const buttons = Number(event.buttons ?? (event.type === "mouseReleased" ? 0 : 1 << button));
-        const common = { bubbles: true, cancelable: true, composed: true, clientX: x, clientY: y, screenX: x, screenY: y, button, buttons, detail: event.clickCount ?? 1 };
-        if (event.type === "mouseWheel") {
-          target.dispatchEvent(new WheelEvent("wheel", { ...common, deltaX: event.deltaX ?? 0, deltaY: event.deltaY ?? 0, deltaMode: WheelEvent.DOM_DELTA_PIXEL }));
-          window.scrollBy({ left: event.deltaX ?? 0, top: event.deltaY ?? 0, behavior: "instant" });
-        } else if (event.type === "mouseMoved") {
-          target.dispatchEvent(new PointerEvent("pointermove", { ...common, pointerId: 1, pointerType: "mouse", isPrimary: true }));
-          target.dispatchEvent(new MouseEvent("mousemove", common));
-          const drag = __state.drag;
-          if (drag != null && (buttons & 1) !== 0) {
-            const dragInit = { ...common, dataTransfer: drag.dataTransfer };
-            if (!drag.started) {
-              drag.started = drag.source.dispatchEvent(new DragEvent("dragstart", dragInit));
-            }
-            if (drag.started) {
-              drag.source.dispatchEvent(new DragEvent("drag", dragInit));
-              if (drag.target !== target) {
-                drag.target?.dispatchEvent(new DragEvent("dragleave", dragInit));
-                target.dispatchEvent(new DragEvent("dragenter", dragInit));
-                drag.target = target;
-              }
-              target.dispatchEvent(new DragEvent("dragover", dragInit));
-            }
-          }
-        } else if (event.type === "mousePressed") {
-          target.dispatchEvent(new PointerEvent("pointerdown", { ...common, pointerId: 1, pointerType: "mouse", isPrimary: true }));
-          target.dispatchEvent(new MouseEvent("mousedown", common));
-          target.focus?.({ preventScroll: true });
-          if (event.button === "left") {
-            const source = target.closest?.('[draggable="true"]') ?? (target.draggable ? target : null);
-            __state.drag = source == null ? null : { source, target: source, dataTransfer: new DataTransfer(), started: false };
-          }
-        } else if (event.type === "mouseReleased") {
-          target.dispatchEvent(new PointerEvent("pointerup", { ...common, pointerId: 1, pointerType: "mouse", isPrimary: true }));
-          target.dispatchEvent(new MouseEvent("mouseup", common));
-          const drag = __state.drag;
-          const completedDrag = drag?.started === true;
-          if (completedDrag) {
-            const dragInit = { ...common, dataTransfer: drag.dataTransfer };
-            target.dispatchEvent(new DragEvent("dragover", dragInit));
-            target.dispatchEvent(new DragEvent("drop", dragInit));
-            drag.source.dispatchEvent(new DragEvent("dragend", dragInit));
-          }
-          __state.drag = null;
-          if (completedDrag) {
-            // A completed drag must not also activate the drop target as a click.
-          } else if (event.button === "right") {
-            target.dispatchEvent(new MouseEvent("contextmenu", common));
-          } else if (!(fileInput && ${JSON.stringify(fileChooserInterceptByTab.get(tabId) === true)})) {
-            target.click?.();
-            if ((event.clickCount ?? 1) >= 2) target.dispatchEvent(new MouseEvent("dblclick", common));
-          }
-        }
-        return event.type === "mouseReleased" && fileInput
-          ? { fileChooser: { backendNodeId: __nodeId(fileInput), mode: fileInput.multiple ? "selectMultiple" : "selectSingle" } }
-          : {};
-      `),
-      { frameId },
-    );
+    const result = await executeCspSafePageOperation(tabId, "dispatchMouse", {
+      event: params,
+      interceptFileChooser: fileChooserInterceptByTab.get(tabId) === true,
+    }, { frameId });
     if (result?.fileChooser) {
       emitDebuggerEvent(tabId, "Page.fileChooserOpened", {
         frameId: cdpFrameId(tabId, frameId),
@@ -2016,99 +2140,16 @@
 
   async function dispatchKeyboard(tabId, params, frameId = 0) {
     frameId = await focusedFrameId(tabId, frameId);
-    return executeUserScript(
-      tabId,
-      operationScript(`
-        const event = ${JSON.stringify(params)};
-        const target = document.activeElement ?? document.body;
-        const type = event.type === "keyUp" ? "keyup" : event.type === "char" ? "keypress" : "keydown";
-        const key = event.key ?? event.text ?? event.code ?? "";
-        const modifiers = Number(event.modifiers ?? 0);
-        const init = { bubbles: true, cancelable: true, composed: true, key, code: event.code ?? "", repeat: event.autoRepeat === true,
-          altKey: Boolean(modifiers & 1), ctrlKey: Boolean(modifiers & 2), metaKey: Boolean(modifiers & 4), shiftKey: Boolean(modifiers & 8) };
-        const allowed = target.dispatchEvent(new KeyboardEvent(type, init));
-        if (type === "keydown" && allowed) {
-          const editable = target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement;
-          const text = event.text ?? (event.type === "char" ? key : "");
-          if (text && editable && !init.ctrlKey && !init.metaKey) {
-            const start = target.selectionStart ?? target.value.length;
-            const end = target.selectionEnd ?? start;
-            target.setRangeText(text, start, end, "end");
-            target.dispatchEvent(new InputEvent("input", { bubbles: true, composed: true, data: text, inputType: "insertText" }));
-          } else if (text && target.isContentEditable && !init.ctrlKey && !init.metaKey) {
-            document.execCommand("insertText", false, text);
-          } else if (key === "Backspace" && editable) {
-            const start = target.selectionStart ?? 0;
-            const end = target.selectionEnd ?? start;
-            const from = start === end ? Math.max(0, start - 1) : start;
-            target.setRangeText("", from, end, "end");
-            target.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "deleteContentBackward" }));
-          } else if (key === "Delete" && editable) {
-            const start = target.selectionStart ?? 0;
-            const end = target.selectionEnd ?? start;
-            const to = start === end ? Math.min(target.value.length, end + 1) : end;
-            target.setRangeText("", start, to, "start");
-            target.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "deleteContentForward" }));
-          } else if (key === "Enter") {
-            if (target instanceof HTMLTextAreaElement) {
-              const start = target.selectionStart ?? target.value.length;
-              const end = target.selectionEnd ?? start;
-              target.setRangeText("\\n", start, end, "end");
-              target.dispatchEvent(new InputEvent("input", { bubbles: true, data: "\\n", inputType: "insertLineBreak" }));
-            } else if (target instanceof HTMLButtonElement || target instanceof HTMLAnchorElement) {
-              target.click();
-            } else if (target instanceof HTMLInputElement && target.form) {
-              target.form.requestSubmit?.();
-            }
-          } else if (key === "Tab") {
-            const candidates = [...document.querySelectorAll('a[href],button,input,select,textarea,[tabindex]:not([tabindex="-1"])')]
-              .filter((element) => !element.disabled && element.getClientRects().length > 0);
-            const index = candidates.indexOf(target);
-            const next = candidates[(index + (init.shiftKey ? -1 : 1) + candidates.length) % candidates.length];
-            next?.focus();
-          } else if ((init.ctrlKey || init.metaKey) && key.toLowerCase() === "a" && editable) {
-            target.select();
-          }
-        }
-        return {};
-      `),
-      { frameId },
-    );
+    return executeCspSafePageOperation(tabId, "dispatchKeyboard", { event: params }, { frameId });
   }
 
   async function insertText(tabId, text, frameId = 0) {
     frameId = await focusedFrameId(tabId, frameId);
-    return executeUserScript(
-      tabId,
-      operationScript(`
-        const target = document.activeElement ?? document.body;
-        const text = ${JSON.stringify(text ?? "")};
-        if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
-          const start = target.selectionStart ?? target.value.length;
-          const end = target.selectionEnd ?? start;
-          target.setRangeText(text, start, end, "end");
-          target.dispatchEvent(new InputEvent("input", { bubbles: true, composed: true, data: text, inputType: "insertText" }));
-        } else if (target?.isContentEditable) {
-          document.execCommand("insertText", false, text);
-        }
-        return {};
-      `),
-      { frameId },
-    );
+    return executeCspSafePageOperation(tabId, "insertText", { text }, { frameId });
   }
 
   async function synthesizeScroll(tabId, params, frameId = 0) {
-    return executeUserScript(
-      tabId,
-      operationScript(`
-        // CDP defines positive gesture distances as scrolling content left/up;
-        // window.scrollBy uses the opposite sign convention.
-        window.scrollBy({ left: ${-(Number(params.xDistance) || 0)}, top: ${-(Number(params.yDistance) || 0)}, behavior: "instant" });
-        window.dispatchEvent(new Event("scroll", { bubbles: true }));
-        return {};
-      `),
-      { frameId },
-    );
+    return executeCspSafePageOperation(tabId, "synthesizeScroll", params, { frameId });
   }
 
   async function setFileInputFiles(tabId, params, frameId = 0) {

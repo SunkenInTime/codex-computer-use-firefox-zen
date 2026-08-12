@@ -27,6 +27,8 @@ const webRequest = {
 };
 const executedTargets = [];
 const executedSources = [];
+const cspSafeOperations = [];
+const cspSafeFunctionSources = [];
 const executedFaviconTargets = [];
 const createdTabs = [];
 const fetchedUrls = [];
@@ -108,6 +110,17 @@ const browser = {
   scripting: {
     async executeScript({ target, func, args }) {
       executedTargets.push(target);
+      if (func?.name === "runCspSafePageOperation") {
+        cspSafeOperations.push({ operation: args[0], payload: args[1], target });
+        cspSafeFunctionSources.push(String(func));
+        let value = {};
+        if (args[0] === "focusedState") {
+          value = target.frameIds?.[0] === 7
+            ? { focused: true, meaningful: true, frameOwner: false }
+            : { focused: false, meaningful: false, frameOwner: false };
+        }
+        return [{ frameId: target.frameIds?.[0] ?? 0, result: value }];
+      }
       if (args[0] === "https://top.test/favicon.ico" && typeof func === "function") {
         executedFaviconTargets.push(target);
         return [{ frameId: 0, result: {
@@ -323,7 +336,18 @@ await compat.debugger.sendCommand({ tabId: 1 }, "Runtime.evaluate", {
 assert.equal(JSON.stringify(executedTargets.at(-1).frameIds), "[7]", "Focused cross-origin clipboard evaluation was not tunneled into the child frame.");
 
 await compat.debugger.sendCommand({ tabId: 1 }, "Input.dispatchKeyEvent", { type: "rawKeyDown", key: "Control", code: "ControlLeft", text: "" });
-assert.doesNotThrow(() => new Function(`return ${executedSources.at(-1)}`), "Synthesized keyboard script must remain valid when its Enter fallback contains a newline.");
+assert.equal(cspSafeOperations.at(-1).operation, "dispatchKeyboard", "Keyboard input must use the CSP-safe page-operation path.");
+assert.doesNotMatch(cspSafeFunctionSources.at(-1), /\beval\s*\(/u, "CSP-safe page operations must not dynamically evaluate source text.");
+assert.equal(cspSafeOperations.at(-1).target.frameIds[0], 7, "CSP-safe keyboard input must preserve focused child-frame routing.");
+
+await compat.debugger.sendCommand({ tabId: 1 }, "Accessibility.getFullAXTree", {});
+assert.equal(cspSafeOperations.at(-1).operation, "accessibilityTree", "Accessibility inspection must survive strict page CSP.");
+await compat.debugger.sendCommand({ tabId: 1 }, "DOMSnapshot.captureSnapshot", {});
+assert.ok(cspSafeOperations.some(({ operation }) => operation === "captureDomSnapshot"), "DOM snapshots must survive strict page CSP.");
+await compat.debugger.sendCommand({ tabId: 1 }, "Input.dispatchMouseEvent", { type: "mousePressed", x: 20, y: 30, button: "left" });
+assert.equal(cspSafeOperations.at(-1).operation, "dispatchMouse", "Pointer input must survive strict page CSP.");
+await compat.debugger.sendCommand({ tabId: 1 }, "Input.insertText", { text: "hello" });
+assert.equal(cspSafeOperations.at(-1).operation, "insertText", "Text insertion must survive strict page CSP.");
 
 const owner = await compat.debugger.sendCommand({ tabId: 1 }, "DOM.getFrameOwner", { frameId: "firefox-frame-1-7" });
 assert.equal(owner.nodeId, 3, "Child-frame owner was not resolved in its parent frame.");
@@ -361,4 +385,4 @@ const unpausedResponse = beforeRequest({ requestId: "req-3", tabId: 1, frameId: 
 assert.equal(JSON.stringify(unpausedResponse), "{}", "Empty Fetch patterns must clear interception instead of pausing every request.");
 assert.equal(events.filter((event) => event.method === "Fetch.requestPaused").length, pauseCount);
 
-console.log(JSON.stringify({ ok: true, bridgeIdentity: true, toolbarSettings: true, nativeSidebarTracking: true, hostAccessPreflight: true, screenshotFallback: true, frameTree: true, childExecution: true, keyboardSyntax: true, liveNetworkEvents: true, responseBody: true, fetchInterception: true, fetchEmptyPatternClear: true }, null, 2));
+console.log(JSON.stringify({ ok: true, bridgeIdentity: true, toolbarSettings: true, nativeSidebarTracking: true, hostAccessPreflight: true, screenshotFallback: true, frameTree: true, childExecution: true, cspSafeInput: true, liveNetworkEvents: true, responseBody: true, fetchInterception: true, fetchEmptyPatternClear: true }, null, 2));
