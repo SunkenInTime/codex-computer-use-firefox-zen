@@ -1,5 +1,5 @@
 {
-  "version": "1.4.5",
+  "version": "1.4.6",
   "upstream_extension_version": "1.2.27236.6274",
   "native_host_name": "com.openai.codexextension",
   "gecko_extension_id": "codex-computer-use-firefox-zen@sunkenintime"

@@ -6,6 +6,8 @@ Git tag.
 
 ## Unreleased
 
+## 1.4.6 - 2026-08-12
+
 - Fixed `@` open-tab mentions in Firefox and Zen by recognizing the port's
   native tab provider instead of discarding its results behind a Chrome-only
   plugin-discovery flag.
@@ -13,6 +15,8 @@ Git tag.
   process running after the browser exited.
 - Retried transient network and GitHub server failures while downloading npm
   installer assets.
+- Refreshed the Firefox and Zen Browser product name and icon set across the
+  extension, npm installer, documentation, and Mozilla listing metadata.
 
 ## 1.4.5 - 2026-08-11
 
