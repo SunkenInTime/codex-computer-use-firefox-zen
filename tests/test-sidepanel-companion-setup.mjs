@@ -1,9 +1,15 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import {
+  CODEX_LOGO_PATH,
   getFirefoxCompanionSetupDetails,
   isFirefoxCompanionSetupError,
 } from "../extension/codex-sidepanel/firefox-companion-setup.js";
+
+assert.ok(
+  fs.existsSync(`extension/${CODEX_LOGO_PATH}`),
+  `The Codex logo referenced by the companion setup screen must exist: ${CODEX_LOGO_PATH}`,
+);
 
 assert.equal(isFirefoxCompanionSetupError("Native transport disconnected"), true);
 assert.equal(

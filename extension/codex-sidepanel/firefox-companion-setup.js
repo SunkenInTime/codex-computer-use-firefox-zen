@@ -33,22 +33,15 @@ function appendElement(document, parent, tagName, className, text) {
   return element;
 }
 
-function appendTerminalMark(document, parent) {
-  const mark = appendElement(document, parent, "div", "firefox-companion-setup__mark");
-  mark.setAttribute("aria-hidden", "true");
-  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svg.setAttribute("viewBox", "0 0 24 24");
-  svg.setAttribute("fill", "none");
-  svg.setAttribute("stroke", "currentColor");
-  svg.setAttribute("stroke-width", "2");
-  svg.setAttribute("stroke-linecap", "round");
-  svg.setAttribute("stroke-linejoin", "round");
-  const prompt = document.createElementNS("http://www.w3.org/2000/svg", "path");
-  prompt.setAttribute("d", "m5 7 5 5-5 5");
-  const cursor = document.createElementNS("http://www.w3.org/2000/svg", "path");
-  cursor.setAttribute("d", "M12 17h7");
-  svg.append(prompt, cursor);
-  mark.append(svg);
+// The same Codex blossom mark the upstream onboarding surface renders.
+export const CODEX_LOGO_PATH = "codex-sidepanel/assets/app-D0g8sCle.png";
+
+function appendCodexLogo(document, parent, extension) {
+  const logo = appendElement(document, parent, "img", "firefox-companion-setup__logo");
+  logo.src = extension.runtime.getURL(CODEX_LOGO_PATH);
+  logo.alt = "";
+  logo.draggable = false;
+  logo.setAttribute("aria-hidden", "true");
 }
 
 function appendDownload(document, parent, { description, href, label, platform }) {
@@ -57,8 +50,9 @@ function appendDownload(document, parent, { description, href, label, platform }
   link.target = "_blank";
   link.rel = "noopener noreferrer";
   link.dataset.platform = platform;
-  appendElement(document, link, "strong", "", label);
-  appendElement(document, link, "span", "", description);
+  const text = appendElement(document, link, "div", "firefox-companion-setup__download-text");
+  appendElement(document, text, "strong", "", label);
+  appendElement(document, text, "span", "", description);
   return link;
 }
 
@@ -122,7 +116,7 @@ export function renderFirefoxCompanionSetup({
   const main = appendElement(document, root, "main", "firefox-companion-setup");
   const panel = appendElement(document, main, "section", "firefox-companion-setup__panel");
   panel.setAttribute("aria-labelledby", "firefox-companion-setup-title");
-  appendTerminalMark(document, panel);
+  appendCodexLogo(document, panel, extension);
   appendElement(document, panel, "p", "firefox-companion-setup__eyebrow", "One-time Firefox setup");
   const title = appendElement(document, panel, "h1", "firefox-companion-setup__title", "Enable the Codex connection");
   title.id = "firefox-companion-setup-title";
