@@ -1,6 +1,6 @@
 [package]
 name = "codex-firefox-bridge"
-version = "1.4.7"
+version = "1.4.8"
 edition = "2021"
 description = "Firefox native-messaging bridge for the installed OpenAI Codex extension host"
 license = "UNLICENSED"
