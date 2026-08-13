@@ -2,7 +2,7 @@
   "name": "codex-computer-use-firefox-zen",
   "private": true,
   "type": "module",
-  "version": "1.4.8",
+  "version": "1.4.9",
   "description": "Codex computer-use compatibility port for Firefox and Zen Browser",
   "scripts": {
     "check": "node scripts/check-version.mjs && node scripts/verify-extension.mjs",
