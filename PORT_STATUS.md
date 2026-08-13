@@ -28,6 +28,11 @@ The extension was loaded temporarily from `extension/manifest.json`, its optiona
 - A second live emulation pass measured exactly 900 x 700 while also reporting DPR 2, five touch points, `fr-CA`, `America/New_York`, and the overridden user agent; reset restored 2048 x 1234.
 - Translated network events included request, response, and load completion. `Network.getResponseBody` returned the complete 232-byte SVG body. Explicit `Fetch` interception and synthetic fulfillment pass the protocol test, and `Fetch.enable({patterns: []})` correctly clears interception before navigation/reload.
 - `Page.getFrameTree` returned the main document plus child and grandchild, while `DOMSnapshot.captureSnapshot` returned all three documents.
+- A code-generation-disabled strict-CSP regression now covers the complete
+  Browser Use inspect-and-type path: `playwright.domSnapshot()`,
+  `dom_cua.get_visible_dom()`, DOM-CUA node targeting, `cua.type()`, and
+  `dom_cua.type()`. The test executes the same named page-operation function
+  used by Firefox rather than fabricating a successful `Runtime.evaluate`.
 - Confirm and prompt calls are discoverable through the normal browser dialog API; accepted choices are replayed into the originating control so typical event-driven pages observe the chosen result.
 - Static and native integration tests pass. `web-ext lint` reports 0 errors, 0 notices, and 72 warnings inherited from minified application code, unsupported APIs translated by the compatibility layer, or intentional compatibility serialization.
 
@@ -41,8 +46,16 @@ Normal ChatGPT computer-use workflows reached feature parity in testing. The rem
 2. `Fetch.fulfillRequest` is implemented by redirecting the intercepted request to an equivalent `data:` response. Status, headers, body, and normal consumer behavior are covered, but code that requires the synthetic response to retain the original request URL or exact redirect history can observe a difference.
 3. DevTools-only tracing and JavaScript debugger pause/resume commands are compatibility no-ops. They are not part of the extension's user-facing computer-use workflow.
 4. Firefox does not expose Chrome renderer/debugger targets. The port synthesizes target/session/frame scoping for the CDP methods used by computer use, including tested nested cross-origin interaction, but it is not a general replacement for every third-party CDP debugger client.
-5. The tested manifest requires Firefox 152 or newer. Older Firefox releases may work but were not certified.
-6. The generated archive is unsigned. Firefox and Zen Browser remove a temporary add-on at restart; permanent distribution requires Mozilla signing. This is an installation constraint, not a runtime feature difference.
+5. On sites that forbid dynamic evaluation through Content Security Policy,
+   the built-in DOM snapshot, DOM CUA, and direct CUA workflows use structured
+   compatibility operations and remain available. Arbitrary
+   `Runtime.evaluate`, `playwright.evaluate`, and Playwright locator scripts
+   cannot be made general-purpose without Firefox exposing a native debugger
+   execution primitive; the bridge now reports that specific limitation while
+   remaining connected instead of presenting it as a browser-connection
+   failure.
+6. The tested manifest requires Firefox 152 or newer. Older Firefox releases may work but were not certified.
+7. The generated archive is unsigned. Firefox and Zen Browser remove a temporary add-on at restart; permanent distribution requires Mozilla signing. This is an installation constraint, not a runtime feature difference.
 
 Firefox also lacks Chrome's extension debugger API and service-worker/side-panel combination used by the original package. Those are handled by the compatibility layer and do not remain user-visible limitations in the tested build.
 
