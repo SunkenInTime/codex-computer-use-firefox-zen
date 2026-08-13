@@ -547,6 +547,24 @@ const playwrightSnapshot = await compat.debugger.sendCommand({ tabId: 1 }, "Runt
 assert.match(playwrightSnapshot.result.value.full, /Strict CSP/u);
 assert.equal(cspSafeOperations.at(-1).operation, "playwrightDomSnapshot", "playwright.domSnapshot must use a CSP-safe implementation.");
 
+const passwordSentinel = "STRICT_CSP_PASSWORD_MUST_NOT_LEAK";
+const originalInputValue = strictCspInput.value;
+strictCspInput.type = "password";
+strictCspInput.value = passwordSentinel;
+strictCspInput.attributeValues.delete("aria-label");
+const passwordSnapshot = await compat.debugger.sendCommand({ tabId: 1 }, "Runtime.evaluate", {
+  expression: `(() => {
+    const snapshot = injectedScript.incrementalAriaSnapshot(document.body, { mode: "ai" });
+    return { ...snapshot, iframeRefs: snapshot.iframeRefs };
+  })()`,
+  returnByValue: true,
+});
+assert.doesNotMatch(passwordSnapshot.result.value.full, new RegExp(passwordSentinel, "u"), "Playwright snapshots must never expose live password values.");
+assert.match(passwordSnapshot.result.value.full, /textbox/u, "Password controls should remain discoverable without exposing their values.");
+strictCspInput.type = "text";
+strictCspInput.value = originalInputValue;
+strictCspInput.attributeValues.set("aria-label", "Strict CSP");
+
 const visibleDomOptions = {
   booleanAttributeNames: ["checked", "disabled"],
   codexOverlayRootId: "codex-overlay",

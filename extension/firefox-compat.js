@@ -941,19 +941,22 @@
           } catch {}
           return true;
         };
-        const textFor = (element) => (element.getAttribute?.("aria-label")
-          || element.getAttribute?.("alt")
-          || element.getAttribute?.("title")
-          || element.getAttribute?.("placeholder")
-          || element.labels?.[0]?.textContent
-          || ("value" in element && typeof element.value === "string" ? element.value : "")
-          || [...(element.childNodes ?? [])]
-            .filter((child) => child.nodeType === Node.TEXT_NODE)
-            .map((child) => child.nodeValue ?? "")
-            .join(" "))
-          .replace(/\s+/gu, " ")
-          .trim()
-          .slice(0, 500);
+        const textFor = (element) => {
+          const isPasswordInput = element instanceof HTMLInputElement && element.type.toLowerCase() === "password";
+          return (element.getAttribute?.("aria-label")
+            || element.getAttribute?.("alt")
+            || element.getAttribute?.("title")
+            || element.getAttribute?.("placeholder")
+            || element.labels?.[0]?.textContent
+            || (!isPasswordInput && "value" in element && typeof element.value === "string" ? element.value : "")
+            || [...(element.childNodes ?? [])]
+              .filter((child) => child.nodeType === Node.TEXT_NODE)
+              .map((child) => child.nodeValue ?? "")
+              .join(" "))
+            .replace(/\s+/gu, " ")
+            .trim()
+            .slice(0, 500);
+        };
         const quote = (value) => String(value).replaceAll("\\", "\\\\").replaceAll('"', '\\"');
         const interestingRoles = new Set([
           "button", "checkbox", "combobox", "form", "heading", "iframe", "img", "link", "list", "listitem",
