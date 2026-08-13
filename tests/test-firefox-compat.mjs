@@ -315,8 +315,7 @@ assert.equal(sidePanelOpenEvents.length, 1, "Untrusted senders must not synthesi
 context.chrome.runtime.connectNative("com.openai.codexextension");
 nativePort.onDisconnect.emit();
 await new Promise((resolve) => setTimeout(resolve, 0));
-assert.equal(createdTabs.length, 1, "An immediate native disconnect must open companion setup.");
-assert.equal(createdTabs[0].url, "moz-extension://test/companion-required.html");
+assert.equal(createdTabs.length, 0, "An immediate native disconnect must keep setup inside the sidebar.");
 
 const events = [];
 compat.debugger.onEvent.addListener((sourceInfo, method, params) => events.push({ sourceInfo, method, params }));
