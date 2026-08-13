@@ -29,6 +29,7 @@ const executedTargets = [];
 const executedSources = [];
 const cspSafeOperations = [];
 const cspSafeFunctionSources = [];
+const executeScriptCalls = [];
 const executedFaviconTargets = [];
 const createdTabs = [];
 const fetchedUrls = [];
@@ -37,6 +38,7 @@ const badgeTexts = [];
 let allWebsiteAccessGranted = true;
 let captureVisibleTabCalls = [];
 let targetTabActive = true;
+let strictCspEnabled = false;
 const tabUpdateCalls = [];
 const nativePostedMessages = [];
 const nativePort = {
@@ -45,6 +47,96 @@ const nativePort = {
   postMessage(message) { nativePostedMessages.push(message); },
   disconnect() {},
 };
+
+class StrictCspEvent {
+  constructor(type, init = {}) { this.type = type; Object.assign(this, init); }
+}
+class StrictCspElement {}
+class StrictCspHtmlElement extends StrictCspElement {
+  constructor() {
+    super();
+    this.attributeValues = new Map();
+    this.attributes = [];
+    this.childNodes = [];
+    this.children = [];
+    this.events = [];
+    this.isConnected = true;
+    this.isContentEditable = false;
+    this.shadowRoot = null;
+  }
+  closest(selector) { return selector.includes("input") ? this : null; }
+  dispatchEvent(event) { this.events.push(event); return true; }
+  focus() {}
+  getAttribute(name) { return this.attributeValues.get(name) ?? null; }
+  hasAttribute(name) { return this.attributeValues.has(name); }
+  getBoundingClientRect() { return { bottom: 50, height: 30, left: 10, right: 40, top: 20, width: 30 }; }
+  getClientRects() { return [this.getBoundingClientRect()]; }
+  scrollIntoView() {}
+}
+class StrictCspInputElement extends StrictCspHtmlElement {
+  constructor() {
+    super();
+    this.value = "";
+    this.selectionStart = 0;
+    this.selectionEnd = 0;
+    this.disabled = false;
+    this.readOnly = false;
+    this.type = "text";
+    this.localName = "input";
+    this.nodeName = "INPUT";
+    this.tagName = "INPUT";
+    this.attributeValues.set("aria-label", "Strict CSP");
+  }
+  setRangeText(text, start, end, selectionMode) {
+    this.value = this.value.slice(0, start) + text + this.value.slice(end);
+    if (selectionMode === "end") this.selectionStart = this.selectionEnd = start + text.length;
+  }
+}
+class StrictCspTextAreaElement extends StrictCspInputElement {}
+class StrictCspFrameElement extends StrictCspHtmlElement {}
+const strictCspInput = new StrictCspInputElement();
+const strictCspDocument = {
+  activeElement: strictCspInput,
+  body: strictCspInput,
+  documentElement: strictCspInput,
+  elementFromPoint: () => strictCspInput,
+  hasFocus: () => true,
+  querySelectorAll: () => [],
+};
+const strictCspPage = {
+  document: strictCspDocument,
+  Node: { ELEMENT_NODE: 1, TEXT_NODE: 3 },
+  Element: StrictCspElement,
+  HTMLElement: StrictCspHtmlElement,
+  HTMLInputElement: StrictCspInputElement,
+  HTMLTextAreaElement: StrictCspTextAreaElement,
+  HTMLIFrameElement: StrictCspFrameElement,
+  HTMLFrameElement: StrictCspFrameElement,
+  InputEvent: StrictCspEvent,
+  KeyboardEvent: StrictCspEvent,
+  MouseEvent: StrictCspEvent,
+  PointerEvent: StrictCspEvent,
+  WheelEvent: StrictCspEvent,
+  ClipboardEvent: undefined,
+  DataTransfer: undefined,
+  getComputedStyle: () => ({ display: "block", opacity: "1", pointerEvents: "auto", visibility: "visible" }),
+  innerHeight: 800,
+  innerWidth: 1200,
+  Map,
+  Set,
+  WeakMap,
+};
+strictCspPage.window = strictCspPage;
+strictCspDocument.defaultView = strictCspPage;
+strictCspInput.ownerDocument = strictCspDocument;
+const strictCspPageContext = vm.createContext(strictCspPage, {
+  codeGeneration: { strings: false, wasm: false },
+});
+
+function executeInStrictCspPage(func, args) {
+  return vm.runInContext(`(${String(func)})(${args.map((argument) => JSON.stringify(argument)).join(",")})`, strictCspPageContext);
+}
+
 const browser = {
   runtime: {
     id: "codex-computer-use-firefox-zen@sunkenintime", onMessage: new EventMock(),
@@ -109,8 +201,9 @@ const browser = {
     async getFrame({ frameId }) { return { frameId, url: frameId === 7 ? "https://child.test/" : "https://top.test/" }; },
   },
   scripting: {
-    async executeScript({ target, func, args }) {
+    async executeScript({ target, func, args, world, injectImmediately }) {
       executedTargets.push(target);
+      executeScriptCalls.push({ target, func, args, world, injectImmediately });
       if (func?.name === "runCspSafePageOperation") {
         cspSafeOperations.push({ operation: args[0], payload: args[1], target });
         cspSafeFunctionSources.push(String(func));
@@ -119,6 +212,15 @@ const browser = {
           value = target.frameIds?.[0] === 7
             ? { focused: true, meaningful: true, frameOwner: false }
             : { focused: false, meaningful: false, frameOwner: false };
+        } else if ([
+          "dispatchKeyboard", "dispatchMouse", "playwrightDomSnapshot", "visibleDomPoint", "visibleDomSnapshot",
+          "virtualClipboard", "virtualClipboardCommitCut",
+        ].includes(args[0])) {
+          value = executeInStrictCspPage(func, args);
+        } else if (args[0] === "describeNode" && args[1].nodeId === 3) {
+          value = { node: { nodeId: 3, backendNodeId: 3, nodeType: 1, nodeName: "IFRAME", localName: "iframe", nodeValue: "", childNodeCount: 0, attributes: ["src", "https://child.test/"], __frameOwnerIndex: 0, __sameUrlOwnerIndex: 0, __resolvedFrameUrl: "https://child.test/" } };
+        } else if (args[0] === "describeNode" && args[1].nodeId === 4) {
+          value = { node: { nodeId: 4, backendNodeId: 4, nodeType: 1, nodeName: "DIV", localName: "div", nodeValue: "", childNodeCount: 0, attributes: [] } };
         }
         return [{ frameId: target.frameIds?.[0] ?? 0, result: value }];
       }
@@ -129,6 +231,9 @@ const browser = {
           contentType: "image/x-icon",
           status: 200,
         } }];
+      }
+      if (strictCspEnabled) {
+        return [{ frameId: target.frameIds?.[0] ?? 0, error: { message: "call to eval() blocked by Content Security Policy" } }];
       }
       const sourceText = args[0];
       executedSources.push(sourceText);
@@ -368,6 +473,151 @@ await compat.debugger.sendCommand({ tabId: 1 }, "Runtime.evaluate", {
 });
 assert.equal(JSON.stringify(executedTargets.at(-1).frameIds), "[7]", "Focused cross-origin clipboard evaluation was not tunneled into the child frame.");
 
+const browserUseBindingName = "__browserUseClipboard_strict_csp_test";
+strictCspEnabled = true;
+const strictCspOperationStart = cspSafeOperations.length;
+await compat.debugger.sendCommand({ tabId: 1 }, "Runtime.addBinding", { name: browserUseBindingName });
+const clipboardInit = await compat.debugger.sendCommand({ tabId: 1 }, "Page.addScriptToEvaluateOnNewDocument", {
+  runImmediately: true,
+  source: `(() => {
+    const installPageClipboardBridge = () => { globalThis.__browserUseClipboardBridge = {}; };
+    installPageClipboardBridge(${JSON.stringify(browserUseBindingName)});
+  })()`,
+});
+const bridgeCheck = await compat.debugger.sendCommand({ tabId: 1 }, "Runtime.evaluate", {
+  expression: `globalThis.__browserUseClipboardBridge?.bindingName === ${JSON.stringify(browserUseBindingName)}`,
+  returnByValue: true,
+});
+assert.equal(bridgeCheck.result.value, true, "The Browser Use clipboard handshake must not depend on eval under strict CSP.");
+
+const typedText = 'strict CSP text with ")}", <markup>, and const data = await pageFunction(';
+const virtualClipboardExpression = `(
+  async () => {
+    try {
+      const pageFunction = async (args) => {
+        if (args.action === "paste" && args.clipboardItems.length === 0)
+          throw new Error("Browser Use virtual clipboard has no data to paste");
+        return {};
+      };
+      const data = await pageFunction(${JSON.stringify({
+        action: "paste",
+        clipboardItems: [{ entries: [{ mime_type: "text/plain", text: typedText }], presentation_style: "unspecified" }],
+        replaceInputValue: false,
+      })});
+      return { ok: true, data };
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  }
+)()`;
+const virtualPaste = await compat.debugger.sendCommand({ tabId: 1 }, "Runtime.evaluate", {
+  expression: virtualClipboardExpression,
+  awaitPromise: true,
+  returnByValue: true,
+});
+assert.equal(virtualPaste.result.value.ok, true);
+assert.equal(strictCspInput.value, typedText, "cua.type/dom_cua.type virtual paste did not reach the focused input under strict CSP.");
+assert.equal(cspSafeOperations.at(-1).operation, "virtualClipboard");
+assert.equal(cspSafeOperations.at(-1).target.frameIds[0], 7, "Strict-CSP typing must preserve focused child-frame routing.");
+
+await compat.debugger.sendCommand({ tabId: 1 }, "Input.dispatchKeyEvent", { type: "char", key: "!", text: "!" });
+assert.equal(strictCspInput.value, `${typedText}!`, "Input.dispatchKeyEvent type=char must insert its text.");
+await compat.debugger.sendCommand({ tabId: 1 }, "Input.dispatchMouseEvent", { type: "mouseMoved", x: 10, y: 20 });
+const strictMouseMove = strictCspInput.events.filter(({ type }) => type === "mousemove").at(-1);
+assert.equal(strictMouseMove.buttons, 0, "A plain mouse move must not imply that the left button is pressed.");
+
+const playwrightInstall = await compat.debugger.sendCommand({ tabId: 1 }, "Runtime.evaluate", {
+  expression: `(() => {
+    if (!window.__codexPlaywrightInjected) {
+      window.__codexPlaywrightInjected = new PlaywrightInjected.InjectedScript(window, {});
+    }
+  })()`,
+  awaitPromise: true,
+  returnByValue: false,
+});
+assert.equal(playwrightInstall.result.type, "undefined", "The optional Playwright helper install must not use eval under strict CSP.");
+
+const playwrightSnapshot = await compat.debugger.sendCommand({ tabId: 1 }, "Runtime.evaluate", {
+  expression: `(() => {
+    const snapshot = injectedScript.incrementalAriaSnapshot(document.body, { mode: "ai" });
+    return { ...snapshot, iframeRefs: snapshot.iframeRefs };
+  })()`,
+  returnByValue: true,
+});
+assert.match(playwrightSnapshot.result.value.full, /Strict CSP/u);
+assert.equal(cspSafeOperations.at(-1).operation, "playwrightDomSnapshot", "playwright.domSnapshot must use a CSP-safe implementation.");
+
+const passwordSentinel = "STRICT_CSP_PASSWORD_MUST_NOT_LEAK";
+const originalInputValue = strictCspInput.value;
+strictCspInput.type = "password";
+strictCspInput.value = passwordSentinel;
+strictCspInput.attributeValues.delete("aria-label");
+const passwordSnapshot = await compat.debugger.sendCommand({ tabId: 1 }, "Runtime.evaluate", {
+  expression: `(() => {
+    const snapshot = injectedScript.incrementalAriaSnapshot(document.body, { mode: "ai" });
+    return { ...snapshot, iframeRefs: snapshot.iframeRefs };
+  })()`,
+  returnByValue: true,
+});
+assert.doesNotMatch(passwordSnapshot.result.value.full, new RegExp(passwordSentinel, "u"), "Playwright snapshots must never expose live password values.");
+assert.match(passwordSnapshot.result.value.full, /textbox/u, "Password controls should remain discoverable without exposing their values.");
+strictCspInput.type = "text";
+strictCspInput.value = originalInputValue;
+strictCspInput.attributeValues.set("aria-label", "Strict CSP");
+
+const visibleDomOptions = {
+  booleanAttributeNames: ["checked", "disabled"],
+  codexOverlayRootId: "codex-overlay",
+  interactiveRoleNames: ["button", "textbox"],
+  interactiveTags: ["button", "input", "textarea"],
+  maxChars: 20_000,
+  maxElements: 200,
+  renderedAttributeNames: ["aria-label", "placeholder", "role", "type", "value"],
+  reviewerOnly: false,
+  viewportClip: null,
+};
+const visibleDom = await compat.debugger.sendCommand({ tabId: 1 }, "Runtime.evaluate", {
+  expression: `(() => {
+    const state = globalThis.__browserUseVisibleDomState;
+    const interactiveRoleNames = true;
+    const renderedAttributeNames = true;
+    return captureVisibleDom(${JSON.stringify(visibleDomOptions)});
+  })()`,
+  returnByValue: true,
+});
+assert.match(visibleDom.result.value.items[0].line, /Strict CSP/u);
+assert.equal(cspSafeOperations.at(-1).operation, "visibleDomSnapshot", "dom_cua.get_visible_dom must use a CSP-safe implementation.");
+const visibleDomPoint = await compat.debugger.sendCommand({ tabId: 1 }, "Runtime.evaluate", {
+  expression: `(() => {
+    return (function visibleDomPoint(ref, viewportClip) {
+      const element = globalThis.__browserUseVisibleDomState?.refToElement.get(ref);
+      element?.scrollIntoView();
+      return element?.getClientRects();
+    })(${JSON.stringify("1")}, ${JSON.stringify({ bottom: 100, left: 0, right: 100, top: 0 })});
+  })()`,
+  returnByValue: true,
+});
+assert.equal(JSON.stringify(visibleDomPoint.result.value), JSON.stringify({ x: 25, y: 35 }));
+assert.equal(cspSafeOperations.at(-1).operation, "visibleDomPoint", "DOM CUA node resolution must survive strict CSP.");
+
+for (const call of executeScriptCalls.filter(({ func }) => func?.name === "runCspSafePageOperation")) {
+  assert.equal(call.world, "MAIN", "CSP-safe page operations must run in the page's main world.");
+  assert.equal(call.injectImmediately, true, "CSP-safe page operations must request immediate injection.");
+}
+assert.ok(cspSafeOperations.length > strictCspOperationStart);
+await assert.rejects(
+  compat.debugger.sendCommand({ tabId: 1 }, "Runtime.evaluate", { expression: "document.title", returnByValue: true }),
+  /Firefox bridge is connected.*strict-CSP/u,
+  "Unsupported dynamic evaluation should explain the compatibility limit without claiming the bridge is unavailable.",
+);
+await compat.debugger.sendCommand({ tabId: 1 }, "Runtime.evaluate", {
+  expression: `globalThis.__browserUseClipboardBridge?.bindingName === ${JSON.stringify(browserUseBindingName)} && globalThis.__browserUseClipboardBridge.cleanup()`,
+  returnByValue: true,
+});
+await compat.debugger.sendCommand({ tabId: 1 }, "Page.removeScriptToEvaluateOnNewDocument", { identifier: clipboardInit.identifier });
+await compat.debugger.sendCommand({ tabId: 1 }, "Runtime.removeBinding", { name: browserUseBindingName });
+strictCspEnabled = false;
+
 await compat.debugger.sendCommand({ tabId: 1 }, "Input.dispatchKeyEvent", { type: "rawKeyDown", key: "Control", code: "ControlLeft", text: "" });
 assert.equal(cspSafeOperations.at(-1).operation, "dispatchKeyboard", "Keyboard input must use the CSP-safe page-operation path.");
 assert.doesNotMatch(cspSafeFunctionSources.at(-1), /\beval\s*\(/u, "CSP-safe page operations must not dynamically evaluate source text.");
@@ -375,8 +625,9 @@ assert.equal(cspSafeOperations.at(-1).target.frameIds[0], 7, "CSP-safe keyboard 
 
 await compat.debugger.sendCommand({ tabId: 1 }, "Accessibility.getFullAXTree", {});
 assert.equal(cspSafeOperations.at(-1).operation, "accessibilityTree", "Accessibility inspection must survive strict page CSP.");
+const snapshotOperationStart = cspSafeOperations.length;
 await compat.debugger.sendCommand({ tabId: 1 }, "DOMSnapshot.captureSnapshot", {});
-assert.ok(cspSafeOperations.some(({ operation }) => operation === "captureDomSnapshot"), "DOM snapshots must survive strict page CSP.");
+assert.ok(cspSafeOperations.slice(snapshotOperationStart).some(({ operation }) => operation === "captureDomSnapshot"), "DOM snapshots must survive strict page CSP.");
 await compat.debugger.sendCommand({ tabId: 1 }, "Input.dispatchMouseEvent", { type: "mousePressed", x: 20, y: 30, button: "left" });
 assert.equal(cspSafeOperations.at(-1).operation, "dispatchMouse", "Pointer input must survive strict page CSP.");
 await compat.debugger.sendCommand({ tabId: 1 }, "Input.insertText", { text: "hello" });
@@ -389,6 +640,7 @@ assert.equal(topOwner.nodeId, 0, "Top-level snapshot documents should be treated
 assert.equal(topOwner.backendNodeId, 0, "Top-level snapshot documents should have no backend owner node.");
 const describedFrameOwner = await compat.debugger.sendCommand({ tabId: 1 }, "DOM.describeNode", { nodeId: 3 });
 assert.equal(describedFrameOwner.node.frameId, "firefox-frame-1-7", "Iframe owner nodes must identify their child frame, not their parent frame.");
+assert.equal(cspSafeOperations.at(-1).operation, "describeNode", "DOM.describeNode must survive strict page CSP.");
 const describedDiv = await compat.debugger.sendCommand({ tabId: 1 }, "DOM.describeNode", { nodeId: 4 });
 assert.equal(describedDiv.node.frameId, undefined, "Ordinary DOM nodes must not be labeled as frame owners.");
 
@@ -418,4 +670,4 @@ const unpausedResponse = beforeRequest({ requestId: "req-3", tabId: 1, frameId: 
 assert.equal(JSON.stringify(unpausedResponse), "{}", "Empty Fetch patterns must clear interception instead of pausing every request.");
 assert.equal(events.filter((event) => event.method === "Fetch.requestPaused").length, pauseCount);
 
-console.log(JSON.stringify({ ok: true, bridgeIdentity: true, toolbarSettings: true, nativeSidebarTracking: true, hostAccessPreflight: true, screenshotFallback: true, frameTree: true, childExecution: true, cspSafeInput: true, liveNetworkEvents: true, responseBody: true, fetchInterception: true, fetchEmptyPatternClear: true }, null, 2));
+console.log(JSON.stringify({ ok: true, bridgeIdentity: true, toolbarSettings: true, nativeSidebarTracking: true, hostAccessPreflight: true, screenshotFallback: true, frameTree: true, childExecution: true, cspSafeInput: true, strictCspBrowserUse: true, liveNetworkEvents: true, responseBody: true, fetchInterception: true, fetchEmptyPatternClear: true }, null, 2));

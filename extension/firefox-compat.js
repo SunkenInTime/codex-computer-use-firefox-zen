@@ -706,7 +706,7 @@
           parentIndex: [], nodeType: [], nodeName: [], nodeValue: [], backendNodeId: [], attributes: [],
         };
         const layout = { nodeIndex: [], styles: [], bounds: [], text: [], stackingContexts: { index: [] } };
-        const walk = (node, parentIndex) => {
+        const appendNode = (node, parentIndex) => {
           const index = nodes.nodeType.length;
           nodes.parentIndex.push(parentIndex);
           nodes.nodeType.push(node.nodeType);
@@ -730,11 +730,19 @@
             layout.nodeIndex.push(index);
             layout.styles.push([]);
             layout.bounds.push(bounds);
-            layout.text.push(stringIndex(node.textContent ?? ""));
+            layout.text.push(stringIndex(node.nodeType === Node.TEXT_NODE ? (node.nodeValue ?? "") : ""));
           }
-          for (const child of node.childNodes ?? []) walk(child, index);
+          return index;
         };
-        walk(document, -1);
+        const pending = [{ node: document, parentIndex: -1 }];
+        while (pending.length > 0) {
+          const { node, parentIndex } = pending.pop();
+          const index = appendNode(node, parentIndex);
+          const children = [...(node.childNodes ?? [])];
+          for (let childIndex = children.length - 1; childIndex >= 0; childIndex -= 1) {
+            pending.push({ node: children[childIndex], parentIndex: index });
+          }
+        }
         return {
           strings,
           documents: [{
@@ -807,7 +815,7 @@
         state.pointer.element = target;
         const buttonNames = ["left", "middle", "right", "back", "forward"];
         const button = Math.max(0, buttonNames.indexOf(event.button));
-        const buttons = Number(event.buttons ?? (event.type === "mouseReleased" ? 0 : 1 << button));
+        const buttons = Number(event.buttons ?? (event.type === "mousePressed" ? 1 << button : 0));
         const common = { bubbles: true, cancelable: true, composed: true, clientX: x, clientY: y, screenX: x, screenY: y, button, buttons, detail: event.clickCount ?? 1 };
         if (event.type === "mouseWheel") {
           target.dispatchEvent(new WheelEvent("wheel", { ...common, deltaX: event.deltaX ?? 0, deltaY: event.deltaY ?? 0, deltaMode: WheelEvent.DOM_DELTA_PIXEL }));
@@ -871,7 +879,7 @@
         const init = { bubbles: true, cancelable: true, composed: true, key, code: event.code ?? "", repeat: event.autoRepeat === true,
           altKey: Boolean(modifiers & 1), ctrlKey: Boolean(modifiers & 2), metaKey: Boolean(modifiers & 4), shiftKey: Boolean(modifiers & 8) };
         const allowed = target.dispatchEvent(new KeyboardEvent(type, init));
-        if (type === "keydown" && allowed) {
+        if ((type === "keydown" || type === "keypress") && allowed) {
           const editable = target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement;
           const text = event.text ?? (event.type === "char" ? key : "");
           if (text && editable && !init.ctrlKey && !init.metaKey) {
@@ -916,6 +924,366 @@
         }
         return {};
       }
+      case "playwrightDomSnapshot": {
+        const lines = [];
+        const roleFor = (element) => element.getAttribute?.("role") || ({
+          A: "link", BUTTON: "button", INPUT: element.type === "checkbox" ? "checkbox" : "textbox",
+          TEXTAREA: "textbox", SELECT: "combobox", OPTION: "option", IMG: "img",
+          H1: "heading", H2: "heading", H3: "heading", H4: "heading", H5: "heading", H6: "heading",
+          MAIN: "main", NAV: "navigation", FORM: "form", TABLE: "table", UL: "list", OL: "list", LI: "listitem",
+          IFRAME: "iframe", FRAME: "iframe",
+        }[element.tagName] ?? "generic");
+        const visible = (element) => {
+          if (element.getAttribute?.("aria-hidden") === "true" || element.hasAttribute?.("hidden")) return false;
+          try {
+            const style = window.getComputedStyle(element);
+            if (style.display === "none" || style.visibility !== "visible" || Number(style.opacity) <= 0.01) return false;
+          } catch {}
+          return true;
+        };
+        const textFor = (element) => {
+          const isPasswordInput = element instanceof HTMLInputElement && element.type.toLowerCase() === "password";
+          return (element.getAttribute?.("aria-label")
+            || element.getAttribute?.("alt")
+            || element.getAttribute?.("title")
+            || element.getAttribute?.("placeholder")
+            || element.labels?.[0]?.textContent
+            || (!isPasswordInput && "value" in element && typeof element.value === "string" ? element.value : "")
+            || [...(element.childNodes ?? [])]
+              .filter((child) => child.nodeType === Node.TEXT_NODE)
+              .map((child) => child.nodeValue ?? "")
+              .join(" "))
+            .replace(/\s+/gu, " ")
+            .trim()
+            .slice(0, 500);
+        };
+        const quote = (value) => String(value).replaceAll("\\", "\\\\").replaceAll('"', '\\"');
+        const interestingRoles = new Set([
+          "button", "checkbox", "combobox", "form", "heading", "iframe", "img", "link", "list", "listitem",
+          "main", "menuitem", "navigation", "option", "radio", "slider", "spinbutton", "switch", "tab", "table", "textbox",
+        ]);
+        const pending = [...(document.documentElement == null ? [] : [document.documentElement])];
+        while (pending.length > 0 && lines.length < 500) {
+          const element = pending.pop();
+          if (!(element instanceof Element) || !visible(element)) continue;
+          const children = [...element.children];
+          if (element.shadowRoot != null) children.push(...element.shadowRoot.children);
+          for (let index = children.length - 1; index >= 0; index -= 1) pending.push(children[index]);
+          const role = roleFor(element);
+          const text = textFor(element);
+          const isControl = interestingRoles.has(role)
+            || element.isContentEditable
+            || element.hasAttribute?.("tabindex")
+            || element.hasAttribute?.("onclick");
+          if (!isControl && text.length === 0) continue;
+          if (!isControl && children.some((child) => textFor(child).length > 0)) continue;
+          const ref = `firefox-${nodeId(element)}`;
+          const name = text.length > 0 ? ` "${quote(text)}"` : "";
+          const checked = "checked" in element && typeof element.checked === "boolean" ? ` [checked=${element.checked}]` : "";
+          const disabled = "disabled" in element && element.disabled === true ? " [disabled]" : "";
+          const renderedRole = ["generic", "group", "listitem"].includes(role) ? "text" : role;
+          lines.push(`- ${renderedRole}${name} [ref=${ref}]${checked}${disabled}`);
+        }
+        return { full: lines.join("\n"), iframeDepths: {}, iframeRefs: [] };
+      }
+      case "visibleDomSnapshot": {
+        const options = payload.options ?? {};
+        const stateKey = options.reviewerOnly ? "__browserUseReviewerVisibleDomState" : "__browserUseVisibleDomState";
+        const visibleState = globalThis[stateKey] ??= { elementToRef: new WeakMap(), nextId: 1, refToElement: new Map() };
+        visibleState.refToElement.clear();
+        const maxChars = Math.max(0, Number(options.maxChars) || 20_000);
+        const maxElements = Math.max(0, Number(options.maxElements) || 200);
+        const visualViewport = window.visualViewport;
+        const viewport = visualViewport == null
+          ? { bottom: window.innerHeight, left: 0, right: window.innerWidth, top: 0 }
+          : {
+              bottom: visualViewport.offsetTop + visualViewport.height,
+              left: visualViewport.offsetLeft,
+              right: visualViewport.offsetLeft + visualViewport.width,
+              top: visualViewport.offsetTop,
+            };
+        const clip = options.viewportClip == null ? viewport : {
+          bottom: Math.min(viewport.bottom, options.viewportClip.bottom),
+          left: Math.max(viewport.left, options.viewportClip.left),
+          right: Math.min(viewport.right, options.viewportClip.right),
+          top: Math.max(viewport.top, options.viewportClip.top),
+        };
+        const tagFor = (element) => (element.localName || element.nodeName || "").toLowerCase();
+        const rectFor = (element) => {
+          try {
+            const style = window.getComputedStyle(element);
+            if (style.visibility !== "visible" || style.display === "none" || style.pointerEvents === "none" || Number(style.opacity) <= 0.01) return null;
+            for (const rect of element.getClientRects()) {
+              if (rect.width <= 0 || rect.height <= 0 || rect.right <= clip.left || rect.left >= clip.right || rect.bottom <= clip.top || rect.top >= clip.bottom) continue;
+              return { bottom: rect.bottom, left: rect.left, right: rect.right, top: rect.top };
+            }
+          } catch {}
+          return null;
+        };
+        const interactiveTags = new Set(options.interactiveTags ?? ["a", "button", "details", "input", "option", "select", "summary", "textarea"]);
+        const interactiveRoles = new Set(options.interactiveRoleNames ?? ["button", "checkbox", "combobox", "link", "menuitem", "option", "radio", "slider", "spinbutton", "switch", "tab", "textbox"]);
+        const renderedAttributes = options.renderedAttributeNames ?? ["aria-disabled", "aria-label", "contenteditable", "href", "name", "placeholder", "role", "title", "type", "value"];
+        const booleanAttributes = options.booleanAttributeNames ?? ["checked", "disabled", "multiple", "readonly", "required", "selected"];
+        const escapeHtml = (value) => String(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
+        const textFor = (element) => {
+          const pieces = [];
+          const pending = [...(element.childNodes ?? [])];
+          let length = 0;
+          while (pending.length > 0 && length < 160) {
+            const node = pending.shift();
+            if (node.nodeType === Node.TEXT_NODE) {
+              const text = String(node.nodeValue ?? "").replace(/\s+/gu, " ").trim();
+              if (text.length > 0) { pieces.push(text); length += text.length + 1; }
+              continue;
+            }
+            if (node.nodeType !== Node.ELEMENT_NODE) continue;
+            const tag = tagFor(node);
+            if (["noscript", "script", "style", "template"].includes(tag)) continue;
+            pending.unshift(...(node.childNodes ?? []));
+            if (node.shadowRoot != null) pending.unshift(...node.shadowRoot.childNodes);
+          }
+          return pieces.join(" ").replace(/\s+/gu, " ").trim().slice(0, 160);
+        };
+        const isInteractive = (element) => {
+          const tag = tagFor(element);
+          if (element.getAttribute("aria-hidden") === "true" || element.hasAttribute("hidden") || (tag === "input" && element.type === "hidden")) return false;
+          const role = element.getAttribute("role")?.trim().toLowerCase();
+          const editable = element.getAttribute("contenteditable");
+          return interactiveTags.has(tag)
+            || (editable != null && editable.toLowerCase() !== "false")
+            || element.hasAttribute("href")
+            || element.hasAttribute("onclick")
+            || (role != null && interactiveRoles.has(role))
+            || Number(element.getAttribute("tabindex") ?? -1) >= 0
+            || options.reviewerOnly === true;
+        };
+        const refFor = (element) => {
+          let ref = visibleState.elementToRef.get(element);
+          if (ref == null) {
+            ref = String(visibleState.nextId++);
+            visibleState.elementToRef.set(element, ref);
+          }
+          return ref;
+        };
+        const items = [];
+        const frameElements = [];
+        let characters = 0;
+        const pending = [...(document.documentElement == null ? [] : [document.documentElement])];
+        while (pending.length > 0 && items.length < maxElements && characters < maxChars) {
+          const element = pending.pop();
+          if (!(element instanceof Element)) continue;
+          if (element.getAttribute?.("id") === options.codexOverlayRootId) continue;
+          const children = [...element.children];
+          if (element.shadowRoot != null) children.push(...element.shadowRoot.children);
+          for (let index = children.length - 1; index >= 0; index -= 1) pending.push(children[index]);
+          const rect = rectFor(element);
+          if (rect == null) continue;
+          const tag = tagFor(element);
+          const ref = refFor(element);
+          if (tag === "iframe" || tag === "frame") {
+            frameElements.push({
+              rect,
+              ref,
+              size: { height: element.clientHeight || rect.bottom - rect.top, width: element.clientWidth || rect.right - rect.left },
+              ...(typeof element.src === "string" && element.src.length > 0 ? { url: element.src } : {}),
+            });
+            visibleState.refToElement.set(ref, element);
+          }
+          if (!isInteractive(element)) continue;
+          const attributes = [`node_id=${ref}`];
+          for (const name of renderedAttributes) {
+            if (name === "value" && tag === "input" && element.type === "password") continue;
+            const value = element.getAttribute(name);
+            if (value != null && value !== "") attributes.push(`${name}="${escapeHtml(value)}"`);
+          }
+          for (const name of booleanAttributes) if (element.hasAttribute(name)) attributes.push(`${name}="true"`);
+          const text = textFor(element);
+          const line = text.length === 0
+            ? `<${tag} ${attributes.join(" ")} />`
+            : `<${tag} ${attributes.join(" ")}>${escapeHtml(text)}</${tag}>`;
+          const nextCharacters = characters + line.length + (items.length === 0 ? 0 : 1);
+          if (nextCharacters > maxChars) break;
+          items.push({ line, ref });
+          visibleState.refToElement.set(ref, element);
+          characters = nextCharacters;
+        }
+        return { frameElements, items, viewport };
+      }
+      case "visibleDomElement": {
+        const stateKey = payload.reviewerOnly ? "__browserUseReviewerVisibleDomState" : "__browserUseVisibleDomState";
+        const element = globalThis[stateKey]?.refToElement?.get(String(payload.ref));
+        if (element == null) return { result: { type: "object", subtype: "null", value: null } };
+        const objectId = `firefox-object-${state.nextObjectId++}`;
+        state.objects.set(objectId, element);
+        return {
+          result: {
+            type: "object",
+            subtype: "node",
+            className: element.constructor?.name ?? "Element",
+            description: element.tagName?.toLowerCase?.() ?? "Element",
+            objectId,
+          },
+        };
+      }
+      case "visibleDomPoint": {
+        const element = globalThis.__browserUseVisibleDomState?.refToElement?.get(String(payload.ref));
+        if (element == null || element.isConnected === false) return null;
+        element.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+        const clip = payload.viewportClip ?? {
+          bottom: window.innerHeight,
+          left: 0,
+          right: window.innerWidth,
+          top: 0,
+        };
+        const centerInClip = (rect) => {
+          if (rect.width <= 0 || rect.height <= 0) return null;
+          const left = Math.max(rect.left, clip.left);
+          const right = Math.min(rect.right, clip.right);
+          const top = Math.max(rect.top, clip.top);
+          const bottom = Math.min(rect.bottom, clip.bottom);
+          return right > left && bottom > top
+            ? { x: left + (right - left) / 2, y: top + (bottom - top) / 2 }
+            : null;
+        };
+        for (const rect of element.getClientRects?.() ?? []) {
+          const point = centerInClip(rect);
+          if (point != null) return point;
+        }
+        return centerInClip(element.getBoundingClientRect());
+      }
+      case "describeNode": {
+        const node = nodeFromPayload();
+        if (!(node instanceof Node)) throw new Error("DOM node not found");
+        const id = nodeId(node);
+        const frameOwners = [...document.querySelectorAll("iframe,frame")];
+        const ownerIndex = frameOwners.indexOf(node);
+        const ownerUrl = ownerIndex < 0 ? "" : (() => {
+          try {
+            const source = node.hasAttribute("srcdoc") ? "about:srcdoc" : (node.getAttribute("src") || "about:blank");
+            return new URL(source, document.baseURI).href;
+          } catch { return ""; }
+        })();
+        return { node: {
+          nodeId: id,
+          backendNodeId: id,
+          nodeType: node.nodeType,
+          nodeName: node.nodeName,
+          localName: node.localName ?? "",
+          nodeValue: node.nodeValue ?? "",
+          childNodeCount: node.childNodes?.length ?? 0,
+          attributes: node.nodeType === Node.ELEMENT_NODE
+            ? [...node.attributes].flatMap((attribute) => [attribute.name, attribute.value])
+            : [],
+          __frameOwnerIndex: ownerIndex < 0 ? undefined : ownerIndex,
+          __sameUrlOwnerIndex: ownerIndex < 0 ? undefined : frameOwners.slice(0, ownerIndex).filter((element) => {
+            try {
+              const source = element.hasAttribute("srcdoc") ? "about:srcdoc" : (element.getAttribute("src") || "about:blank");
+              return new URL(source, document.baseURI).href === ownerUrl;
+            } catch { return false; }
+          }).length,
+          __resolvedFrameUrl: ownerIndex < 0 ? undefined : ownerUrl,
+        } };
+      }
+      case "virtualClipboard": {
+        const args = payload.args ?? {};
+        const deepestActiveElement = (root) => {
+          const active = root?.activeElement ?? null;
+          if (active == null) return null;
+          if (active.shadowRoot != null) return deepestActiveElement(active.shadowRoot) ?? active;
+          if (active instanceof HTMLIFrameElement || active instanceof HTMLFrameElement) {
+            try { return deepestActiveElement(active.contentDocument) ?? active; } catch { return active; }
+          }
+          return active;
+        };
+        const target = deepestActiveElement(document) ?? document.body;
+        if (args.iabInputTargetToken != null && target?.__codexIabInputTargetToken !== args.iabInputTargetToken) {
+          throw new Error("Active element is no longer the expected input target");
+        }
+        const clipboardItems = Array.isArray(args.clipboardItems) ? args.clipboardItems : [];
+        const itemText = (mimeType) => clipboardItems
+          .flatMap((item) => Array.isArray(item?.entries) ? item.entries : [])
+          .find((entry) => entry?.mime_type === mimeType)?.text ?? "";
+        const makeItems = (text, html = "") => {
+          const entries = [];
+          if (text.length > 0) entries.push({ mime_type: "text/plain", text });
+          if (html.length > 0) entries.push({ mime_type: "text/html", text: html });
+          return entries.length === 0 ? [] : [{ entries, presentation_style: "unspecified" }];
+        };
+        const insert = (plainText, htmlText) => {
+          if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+            if (target.disabled || target.readOnly || plainText.length === 0) return;
+            const setValue = (value) => {
+              const prototypeSetter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(target), "value")?.set;
+              const ownSetter = Object.getOwnPropertyDescriptor(target, "value")?.set;
+              if (prototypeSetter != null && prototypeSetter !== ownSetter) prototypeSetter.call(target, value);
+              else target.value = value;
+            };
+            if (target.selectionStart == null || target.selectionEnd == null) {
+              setValue(args.replaceInputValue === true ? plainText : target.value + plainText);
+            } else {
+              try { target.setRangeText(plainText, target.selectionStart, target.selectionEnd, "end"); }
+              catch { setValue(args.replaceInputValue === true ? plainText : target.value + plainText); }
+            }
+            target.dispatchEvent(new InputEvent("input", { bubbles: true, composed: true, data: plainText, inputType: "insertFromPaste" }));
+          } else if (target instanceof HTMLElement && (target.isContentEditable || target.closest?.('[contenteditable="true"]'))) {
+            target.focus();
+            if (htmlText.length > 0) document.execCommand("insertHTML", false, htmlText);
+            else if (plainText.length > 0) document.execCommand("insertText", false, plainText);
+          }
+        };
+        if (args.action === "paste") {
+          if (clipboardItems.length === 0) throw new Error("Browser Use virtual clipboard has no data to paste");
+          const plainText = itemText("text/plain");
+          const htmlText = args.richTextFallback === true ? itemText("text/html") : "";
+          let shouldInsert = true;
+          try {
+            if (typeof DataTransfer === "function" && typeof ClipboardEvent === "function") {
+              const data = new DataTransfer();
+              for (const item of clipboardItems) for (const entry of item.entries ?? []) {
+                if (typeof entry.text === "string") data.setData(entry.mime_type, entry.text);
+              }
+              shouldInsert = target.dispatchEvent(new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData: data, composed: true }));
+            }
+          } catch {}
+          if (shouldInsert) insert(plainText, htmlText);
+          return {};
+        }
+        let selectedText = "";
+        let commit = null;
+        if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+          const start = target.selectionStart;
+          const end = target.selectionEnd;
+          if (start != null && end != null && start !== end) {
+            selectedText = target.value.slice(start, end);
+            commit = () => {
+              if (!target.disabled && !target.readOnly && target.value.slice(start, end) === selectedText) {
+                target.setRangeText("", start, end, "end");
+                target.dispatchEvent(new InputEvent("input", { bubbles: true, composed: true, inputType: "deleteByCut" }));
+              }
+            };
+          }
+        } else {
+          const selection = target?.ownerDocument?.defaultView?.getSelection?.() ?? window.getSelection?.();
+          if (selection != null && !selection.isCollapsed) {
+            selectedText = selection.toString();
+            const ranges = Array.from({ length: selection.rangeCount }, (_, index) => selection.getRangeAt(index).cloneRange());
+            commit = () => { for (const range of ranges.reverse()) range.deleteContents(); };
+          }
+        }
+        const items = makeItems(selectedText);
+        if (args.action === "cut" && commit != null) {
+          if (args.cutToken == null) throw new Error("Browser Use virtual cut is missing a commit token");
+          state.pendingVirtualCut = { commit, token: args.cutToken };
+        }
+        return { items, ...(args.action === "cut" && commit != null ? { cutToken: args.cutToken } : {}) };
+      }
+      case "virtualClipboardCommitCut": {
+        const pendingCut = state.pendingVirtualCut;
+        if (pendingCut?.token !== payload.cutToken) throw new Error("Browser Use virtual cut is no longer pending");
+        delete state.pendingVirtualCut;
+        pendingCut.commit();
+        return {};
+      }
       case "insertText": {
         const target = document.activeElement ?? document.body;
         const text = String(payload.text ?? "");
@@ -951,7 +1319,7 @@
     });
     const result = results.find((candidate) => candidate.frameId === (frameId ?? 0)) ?? results[0];
     if (result == null) throw new Error("Firefox did not return a CSP-safe page-operation result.");
-    if (result.error) throw new Error(result.error);
+    if (result.error) throw new Error(result.error?.message ?? String(result.error));
     return exposePageReferences(result.result, tabId, frameId ?? 0);
   }
 
@@ -959,6 +1327,102 @@
     return String(source ?? "")
       .replace(/^\s*\/\/[#@]\s*sourceURL=.*$/gmu, "")
       .trim();
+  }
+
+  const BROWSER_USE_CLIPBOARD_BINDING_PREFIX = "__browserUseClipboard_";
+
+  function isBrowserUseClipboardBinding(name) {
+    return typeof name === "string" && name.startsWith(BROWSER_USE_CLIPBOARD_BINDING_PREFIX);
+  }
+
+  function isBrowserUseClipboardInitScript(source) {
+    return typeof source === "string"
+      && source.includes("__browserUseClipboardBridge")
+      && source.includes("installPageClipboardBridge");
+  }
+
+  function parsedJsonAt(source, startIndex) {
+    let index = startIndex;
+    while (/\s/u.test(source[index] ?? "")) index += 1;
+    const opening = source[index];
+    const closing = opening === "{" ? "}" : opening === "[" ? "]" : null;
+    if (closing == null) {
+      const stringMatch = /^(?:"(?:\\.|[^"\\])*"|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?|true|false|null)/u.exec(source.slice(index));
+      return stringMatch == null ? null : { endIndex: index + stringMatch[0].length, value: JSON.parse(stringMatch[0]) };
+    }
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    for (let cursor = index; cursor < source.length; cursor += 1) {
+      const character = source[cursor];
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (character === "\\") escaped = true;
+        else if (character === '"') inString = false;
+        continue;
+      }
+      if (character === '"') {
+        inString = true;
+      } else if (character === opening) {
+        depth += 1;
+      } else if (character === closing) {
+        depth -= 1;
+        if (depth === 0) return { endIndex: cursor + 1, value: JSON.parse(source.slice(index, cursor + 1)) };
+      }
+    }
+    return null;
+  }
+
+  function parseJsonAt(source, startIndex) {
+    return parsedJsonAt(source, startIndex)?.value ?? null;
+  }
+
+  function jsonArgumentAfter(source, marker, { last = false } = {}) {
+    const markerIndex = last ? source.lastIndexOf(marker) : source.indexOf(marker);
+    return markerIndex < 0 ? null : parseJsonAt(source, markerIndex + marker.length);
+  }
+
+  function jsonArgumentsAt(source, index) {
+    const values = [];
+    while (index < source.length) {
+      const parsed = parsedJsonAt(source, index);
+      if (parsed == null) break;
+      values.push(parsed.value);
+      index = parsed.endIndex;
+      while (/\s/u.test(source[index] ?? "")) index += 1;
+      if (source[index] !== ",") break;
+      index += 1;
+    }
+    return values;
+  }
+
+  function jsonArgumentsAfter(source, marker, { last = false } = {}) {
+    const markerIndex = last ? source.lastIndexOf(marker) : source.indexOf(marker);
+    return markerIndex < 0 ? null : jsonArgumentsAt(source, markerIndex + marker.length);
+  }
+
+  function lastJsonArgumentsAfter(source, marker, minimumCount = 1) {
+    let beforeIndex = source.length;
+    while (beforeIndex > 0) {
+      const markerIndex = source.lastIndexOf(marker, beforeIndex - 1);
+      if (markerIndex < 0) return null;
+      const values = jsonArgumentsAt(source, markerIndex + marker.length);
+      if (values != null && values.length >= minimumCount) return values;
+      beforeIndex = markerIndex;
+    }
+    return null;
+  }
+
+  function browserUseBindingNameFromExpression(expression) {
+    const match = /__browserUseClipboardBridge\?\.bindingName\s*===\s*("(?:\\.|[^"\\])*")/u.exec(expression);
+    return match == null ? null : JSON.parse(match[1]);
+  }
+
+  function byValueRemote(value) {
+    if (value === undefined) return { type: "undefined" };
+    if (value === null) return { type: "object", subtype: "null", value: null };
+    const type = typeof value;
+    return { type: type === "object" ? "object" : type, value };
   }
 
   const PAGE_PREAMBLE = String.raw`
@@ -1099,7 +1563,7 @@
       throw new Error("Firefox did not return a page-script result.");
     }
     if (result.error) {
-      throw new Error(result.error);
+      throw new Error(result.error?.message ?? String(result.error));
     }
     if (typeof result.result !== "string") {
       return exposePageReferences(result.result, tabId, frameId ?? 0);
@@ -1213,6 +1677,97 @@
     const returnByValue = params.returnByValue === true;
     const awaitPromise = params.awaitPromise === true;
     const objectGroup = typeof params.objectGroup === "string" ? params.objectGroup : null;
+
+    const browserUseBindingName = browserUseBindingNameFromExpression(expression);
+    if (browserUseBindingName != null) {
+      const installed = bindingNamesByTab.get(tabId)?.has(browserUseBindingName) === true;
+      const value = expression.includes(".cleanup()") ? undefined : installed;
+      return { result: byValueRemote(value) };
+    }
+    if (expression.includes("__browserUseClipboardBridge?.respond(")) {
+      return { result: byValueRemote(undefined) };
+    }
+
+    if (
+      expression.includes("Browser Use virtual clipboard")
+      && expression.includes("const data = await pageFunction(")
+    ) {
+      const args = jsonArgumentAfter(expression, "const data = await pageFunction(");
+      if (args == null || typeof args !== "object") {
+        return { result: byValueRemote({ ok: false, error: "Firefox could not decode the Browser Use virtual clipboard request." }) };
+      }
+      try {
+        const data = await executeCspSafePageOperation(tabId, "virtualClipboard", { args }, { frameId });
+        return { result: byValueRemote({ ok: true, data }) };
+      } catch (error) {
+        return { result: byValueRemote({ ok: false, error: error?.message ?? String(error) }) };
+      }
+    }
+
+    if (
+      expression.includes("Browser Use virtual cut is no longer pending")
+      && expression.includes("const data = await pageFunction(")
+    ) {
+      const args = jsonArgumentAfter(expression, "const data = await pageFunction(");
+      try {
+        const data = await executeCspSafePageOperation(tabId, "virtualClipboardCommitCut", { cutToken: args?.cutToken }, { frameId });
+        return { result: byValueRemote({ ok: true, data }) };
+      } catch (error) {
+        return { result: byValueRemote({ ok: false, error: error?.message ?? String(error) }) };
+      }
+    }
+
+    if (
+      expression.includes("new PlaywrightInjected.InjectedScript")
+      && expression.includes("__codexPlaywrightInjected")
+    ) {
+      // The strict-CSP snapshot path below does not need Playwright's dynamically
+      // generated helper bundle, but the Browser Use client expects its one-time
+      // installation call to succeed before issuing the snapshot request.
+      return { result: byValueRemote(undefined) };
+    }
+
+    if (expression.includes("incrementalAriaSnapshot") && expression.includes("iframeRefs")) {
+      const value = await executeCspSafePageOperation(tabId, "playwrightDomSnapshot", {}, { frameId });
+      return { result: byValueRemote(value) };
+    }
+
+    if (
+      expression.includes("__browserUseVisibleDomState")
+      && expression.includes("interactiveRoleNames")
+      && expression.includes("renderedAttributeNames")
+    ) {
+      const optionsIndex = expression.indexOf('{"booleanAttributeNames"');
+      const options = optionsIndex < 0 ? {} : (parseJsonAt(expression, optionsIndex) ?? {});
+      const value = await executeCspSafePageOperation(tabId, "visibleDomSnapshot", { options }, { frameId });
+      return { result: byValueRemote(value) };
+    }
+
+    if (
+      expression.includes("__browserUseVisibleDomState?.refToElement.get(")
+      && expression.includes("scrollIntoView")
+      && expression.includes("getClientRects")
+    ) {
+      const args = lastJsonArgumentsAfter(expression, "})(", 2);
+      if (typeof args?.[0] === "string" && args[1] != null && typeof args[1] === "object") {
+        const value = await executeCspSafePageOperation(tabId, "visibleDomPoint", {
+          ref: args[0],
+          viewportClip: args[1],
+        }, { frameId });
+        return { result: byValueRemote(value) };
+      }
+    }
+
+    if (expression.includes("refToElement?.get(")) {
+      const ref = jsonArgumentAfter(expression, "refToElement?.get(");
+      if (ref != null) {
+        return executeCspSafePageOperation(tabId, "visibleDomElement", {
+          ref,
+          reviewerOnly: expression.includes("__browserUseReviewerVisibleDomState"),
+        }, { frameId });
+      }
+    }
+
     const code = `(async () => {
       ${PAGE_PREAMBLE}
       try {
@@ -1223,7 +1778,16 @@
         return JSON.stringify({ ok: true, value: { result: { type: "undefined" }, exceptionDetails: __exception(__error) } });
       }
     })()`;
-    return executeUserScript(tabId, code, { frameId });
+    try {
+      return await executeUserScript(tabId, code, { frameId });
+    } catch (error) {
+      if (/\beval\b.*(?:content security policy|csp|unsafe-eval)|(?:content security policy|csp|unsafe-eval).*\beval\b/iu.test(error?.message ?? String(error))) {
+        throw new Error(
+          "The Firefox bridge is connected, but this dynamic Runtime.evaluate script is not supported on a strict-CSP page. Use DOM CUA, CUA, or the built-in DOM snapshot instead.",
+        );
+      }
+      throw error;
+    }
   }
 
   async function callRuntimeFunction(tabId, params, frameId = 0) {
@@ -1280,6 +1844,9 @@
     if (cleanSource.length === 0) {
       return;
     }
+    if (isBrowserUseClipboardInitScript(cleanSource)) {
+      return;
+    }
     const code = `(async () => {
       ${PAGE_PREAMBLE}
       try {
@@ -1293,6 +1860,9 @@
   }
 
   async function installBinding(tabId, name, frameId = 0) {
+    if (isBrowserUseClipboardBinding(name)) {
+      return;
+    }
     const code = operationScript(`
       const __name = ${JSON.stringify(name)};
       Object.defineProperty(globalThis, __name, {
@@ -1864,43 +2434,7 @@
   }
 
   async function describeNode(tabId, params, frameId = 0) {
-    const result = await executeUserScript(
-      tabId,
-      operationScript(`
-        const objectId = ${JSON.stringify(params.objectId ?? null)};
-        const id = ${JSON.stringify(params.nodeId ?? params.backendNodeId ?? 0)};
-        const node = objectId ? __state.objects.get(objectId) : __state.nodes.get(id);
-        if (!(node instanceof Node)) throw new Error("DOM node not found");
-        const nodeId = __nodeId(node);
-        const frameOwners = [...document.querySelectorAll("iframe,frame")];
-        const ownerIndex = frameOwners.indexOf(node);
-        const ownerUrl = ownerIndex < 0 ? "" : (() => {
-          try {
-            const source = node.hasAttribute("srcdoc") ? "about:srcdoc" : (node.getAttribute("src") || "about:blank");
-            return new URL(source, document.baseURI).href;
-          } catch { return ""; }
-        })();
-        return { node: {
-          nodeId,
-          backendNodeId: nodeId,
-          nodeType: node.nodeType,
-          nodeName: node.nodeName,
-          localName: node.localName ?? "",
-          nodeValue: node.nodeValue ?? "",
-          childNodeCount: node.childNodes?.length ?? 0,
-          attributes: node.nodeType === Node.ELEMENT_NODE ? [...node.attributes].flatMap((attribute) => [attribute.name, attribute.value]) : [],
-          __frameOwnerIndex: ownerIndex < 0 ? undefined : ownerIndex,
-          __sameUrlOwnerIndex: ownerIndex < 0 ? undefined : frameOwners.slice(0, ownerIndex).filter((element) => {
-            try {
-              const source = element.hasAttribute("srcdoc") ? "about:srcdoc" : (element.getAttribute("src") || "about:blank");
-              return new URL(source, document.baseURI).href === ownerUrl;
-            } catch { return false; }
-          }).length,
-          __resolvedFrameUrl: ownerIndex < 0 ? undefined : ownerUrl,
-        } };
-      `),
-      { frameId },
-    );
+    const result = await executeCspSafePageOperation(tabId, "describeNode", params, { frameId });
     if (Number.isInteger(result?.node?.__frameOwnerIndex)) {
       const frames = await firefox.webNavigation.getAllFrames({ tabId }).catch(() => []);
       setFrameOwnerFrameId(tabId, frameId, result.node, frames ?? []);
@@ -2792,6 +3326,9 @@
       }
       case "Runtime.removeBinding": {
         bindingNamesByTab.get(tabId)?.delete(params.name);
+        if (isBrowserUseClipboardBinding(params.name)) {
+          return {};
+        }
         await executeUserScript(
           tabId,
           operationScript(`delete globalThis[${JSON.stringify(params.name)}]; return {};`),

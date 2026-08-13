@@ -6,6 +6,15 @@ Git tag.
 
 ## Unreleased
 
+- Completed the strict-CSP Browser Use path for `playwright.domSnapshot()`,
+  `dom_cua.get_visible_dom()`, DOM-CUA node targeting, and the virtual-clipboard
+  paste used by `cua.type()` and `dom_cua.type()`.
+- Added a code-generation-disabled regression harness that exercises the real
+  CSP-safe typing function and verifies the Browser Use clipboard handshake,
+  snapshot routing, node resolution, and accurate unsupported-evaluation error.
+- Corrected mouse-move button state, `char` key insertion, DOM-snapshot text
+  duplication and recursion, and structured Firefox script-error reporting.
+
 ## 1.4.7 - 2026-08-12
 
 - Made accessibility inspection, DOM snapshots, element geometry, pointer,
