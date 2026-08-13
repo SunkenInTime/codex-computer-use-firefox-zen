@@ -138,7 +138,10 @@ h1 {
   font-size: 0.8rem;
 }
 
+.connection,
+.prerequisite,
 .developer-install,
+.doctor,
 .why {
   margin-top: 1.25rem;
   padding: 1.1rem;
@@ -147,15 +150,88 @@ h1 {
   background: rgba(255, 255, 255, 0.45);
 }
 
+.connection h2,
+.prerequisite h2,
 .developer-install h2,
+.doctor h2,
 .why h2 {
   margin: 0;
   font-size: 1rem;
 }
 
+.connection p,
+.prerequisite p,
 .developer-install p,
+.doctor p,
 .why p {
   margin: 0.5rem 0 0;
+  color: #55504a;
+  font-size: 0.88rem;
+  line-height: 1.55;
+}
+
+.connection-flow {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-top: 1rem;
+}
+
+.connection-flow span {
+  min-width: 0;
+  flex: 1;
+  padding: 0.75rem 0.45rem;
+  border-radius: 0.65rem;
+  background: rgba(255, 255, 255, 0.68);
+  font-size: 0.7rem;
+  font-weight: 650;
+  line-height: 1.25;
+  text-align: center;
+}
+
+.connection-flow b {
+  color: #77716a;
+  font-size: 0.8rem;
+}
+
+.prerequisite {
+  border-color: rgba(154, 79, 22, 0.32);
+  background: rgba(215, 129, 55, 0.08);
+}
+
+.compact-steps {
+  margin: 1rem 0;
+  padding-left: 1.25rem;
+  color: #55504a;
+  font-size: 0.84rem;
+  line-height: 1.6;
+}
+
+.text-link {
+  color: inherit;
+  font-size: 0.82rem;
+  font-weight: 650;
+  text-underline-offset: 0.2rem;
+}
+
+.note {
+  margin-top: 1rem !important;
+  padding-top: 1rem;
+  border-top: 1px solid rgba(23, 23, 23, 0.1);
+  font-size: 0.78rem !important;
+}
+
+.bridge-intro {
+  margin-top: 1.75rem;
+}
+
+.bridge-intro h2 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.bridge-intro p:not(.option-label) {
+  margin: 0.5rem 0 1rem;
   color: #55504a;
   font-size: 0.88rem;
   line-height: 1.55;
@@ -196,7 +272,7 @@ h1 {
   cursor: pointer;
 }
 
-ol {
+.finish-steps {
   margin: 2rem 0;
   padding-left: 1.25rem;
   line-height: 1.7;
@@ -212,6 +288,16 @@ ol {
 @media (max-width: 36rem) {
   .downloads {
     grid-template-columns: 1fr;
+  }
+
+  .connection-flow {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .connection-flow b {
+    line-height: 0.8;
+    transform: rotate(90deg);
   }
 }
 
@@ -234,7 +320,12 @@ ol {
 
   .lede,
   .download span,
+  .compact-steps,
+  .connection p,
+  .prerequisite p,
+  .bridge-intro p:not(.option-label),
   .developer-install p,
+  .doctor p,
   .why p,
   .footnote {
     color: #bbb3a8;
@@ -244,7 +335,10 @@ ol {
     border-color: rgba(255, 255, 255, 0.15);
   }
 
+  .connection,
+  .prerequisite,
   .developer-install,
+  .doctor,
   .why,
   .version-status {
     border-color: rgba(255, 255, 255, 0.12);
@@ -253,6 +347,14 @@ ol {
 
   .version-status dl div {
     background: rgba(255, 255, 255, 0.05);
+  }
+
+  .connection-flow span {
+    background: rgba(255, 255, 255, 0.05);
+  }
+
+  .note {
+    border-top-color: rgba(255, 255, 255, 0.1);
   }
 
   .command-row button {

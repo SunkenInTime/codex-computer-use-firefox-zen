@@ -8,9 +8,12 @@
   const macos = document.querySelector("#macos-download");
   const npmCommand = document.querySelector("#npm-command");
   const copyNpmCommand = document.querySelector("#copy-npm-command");
+  const doctorCommand = document.querySelector("#doctor-command");
+  const copyDoctorCommand = document.querySelector("#copy-doctor-command");
   const parameters = new URLSearchParams(location.search);
   const mismatch = parameters.get("reason") === "version-mismatch";
   const command = `npx --yes codex-firefox-bridge@${version} install`;
+  const doctor = `npx --yes codex-firefox-bridge@${version} doctor`;
 
   if (mismatch) {
     const bridgeVersion = parameters.get("bridgeVersion") ?? "unknown";
@@ -28,6 +31,8 @@
       : `v${bridgeVersion}`;
     document.querySelector("#version-status").hidden = false;
     document.querySelector("#extension-update-section").hidden = !extensionIsOlder;
+    document.querySelector("#connection-explanation").hidden = true;
+    document.querySelector("#chrome-prerequisite").hidden = true;
     document.querySelector("#setup-step-one").textContent = extensionIsOlder
       ? "Install the latest signed extension, or choose a matching bridge installer below."
       : "Choose a platform installer or run the exact npm command above.";
@@ -40,18 +45,9 @@
   macos.href =
     `${releaseBase}/codex-firefox-bridge-${version}-macos-universal.pkg`;
   npmCommand.textContent = command;
-  copyNpmCommand.addEventListener("click", async () => {
-    try {
-      await navigator.clipboard.writeText(command);
-      copyNpmCommand.textContent = "Copied";
-      setTimeout(() => {
-        copyNpmCommand.textContent = "Copy";
-      }, 1600);
-    } catch {
-      window.getSelection()?.selectAllChildren(npmCommand);
-      copyNpmCommand.textContent = "Selected";
-    }
-  });
+  doctorCommand.textContent = doctor;
+  configureCopyButton(copyNpmCommand, npmCommand, command);
+  configureCopyButton(copyDoctorCommand, doctorCommand, doctor);
 
   browser.runtime.getPlatformInfo().then(({ os }) => {
     if (os === "win") {
@@ -60,6 +56,21 @@
       macos.classList.add("recommended");
     }
   }).catch(() => {});
+
+  function configureCopyButton(button, code, text) {
+    button.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(text);
+        button.textContent = "Copied";
+        setTimeout(() => {
+          button.textContent = "Copy";
+        }, 1600);
+      } catch {
+        window.getSelection()?.selectAllChildren(code);
+        button.textContent = "Selected";
+      }
+    });
+  }
 
   function compareVersions(left, right) {
     const leftParts = left.split(".").map(Number);

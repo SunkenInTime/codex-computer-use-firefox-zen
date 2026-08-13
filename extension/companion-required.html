@@ -12,10 +12,40 @@
       <p id="eyebrow" class="eyebrow">One-time setup</p>
       <h1 id="page-title">Enable the Codex connection</h1>
       <p id="page-lede" class="lede">
-        Firefox needs a small local companion to connect this extension to your
-        installed Codex host. It runs only while Codex is connected and does not
-        operate a remote service.
+        This connection has two local pieces: OpenAI's native host, registered
+        through the official Chrome integration, and the Firefox companion that
+        relays this extension to that host.
       </p>
+      <section id="connection-explanation" class="connection" aria-labelledby="connection-title">
+        <p class="option-label">How the connection works</p>
+        <h2 id="connection-title">Firefox hands off to the local Codex host</h2>
+        <div class="connection-flow" aria-label="Firefox extension to Codex connection path">
+          <span>Firefox extension</span><b aria-hidden="true">→</b>
+          <span>Firefox companion</span><b aria-hidden="true">→</b>
+          <span>OpenAI native host</span><b aria-hidden="true">→</b>
+          <span>ChatGPT or Codex</span>
+        </div>
+      </section>
+      <section id="chrome-prerequisite" class="prerequisite" aria-labelledby="prerequisite-title">
+        <p class="option-label">Required first</p>
+        <h2 id="prerequisite-title">Set up the official Chrome integration</h2>
+        <p>
+          The Firefox companion depends on the OpenAI native host registered by
+          the desktop app's Chrome plugin setup.
+        </p>
+        <ol class="compact-steps">
+          <li>Install Google Chrome temporarily if it is not already installed.</li>
+          <li>In the ChatGPT or Codex desktop app, open <strong>Plugins → Chrome</strong> and complete setup.</li>
+          <li>Open Chrome once and confirm the ChatGPT side chat loads.</li>
+        </ol>
+        <a class="text-link" href="https://learn.chatgpt.com/docs/chrome-extension#set-up-the-chrome-extension">
+          Open the official Chrome setup guide ↗
+        </a>
+        <p class="note">
+          Chrome does not need to become your default browser or remain open,
+          but the official Chrome integration must remain installed.
+        </p>
+      </section>
       <section id="version-status" class="version-status" aria-labelledby="version-status-title" hidden>
         <h2 id="version-status-title">Installed versions</h2>
         <dl>
@@ -35,6 +65,15 @@
           <span>Install the latest signed build from Mozilla Add-ons</span>
         </a>
       </section>
+      <div class="bridge-intro">
+        <p class="option-label">Then</p>
+        <h2>Install the Firefox companion</h2>
+        <p>
+          This local bridge connects Firefox to the native host registered
+          above. It runs only while Codex is connected and does not operate a
+          remote service.
+        </p>
+      </div>
       <section id="bridge-downloads" class="downloads" aria-label="Companion downloads">
         <a id="windows-download" class="download" href="#">
           <strong>Install for Windows</strong>
@@ -59,11 +98,23 @@
           <button id="copy-npm-command" type="button">Copy</button>
         </div>
       </section>
-      <ol>
-        <li id="setup-step-one">Choose a platform installer or the npm command above.</li>
-        <li id="setup-step-two">Keep the existing Codex Chrome integration installed.</li>
-        <li id="setup-step-three">Close this page and reopen the Codex sidebar.</li>
+      <ol class="finish-steps">
+        <li id="setup-step-one">Install the Firefox companion with a platform installer or the npm command above.</li>
+        <li id="setup-step-two">Restart the ChatGPT or Codex desktop app after both local pieces are installed.</li>
+        <li id="setup-step-three">Close this page, reopen the Codex sidebar, and try again.</li>
       </ol>
+      <section class="doctor" aria-labelledby="doctor-title">
+        <p class="option-label">Still disconnected?</p>
+        <h2 id="doctor-title">Check both local pieces</h2>
+        <p>
+          This reports whether the Firefox companion and its required OpenAI
+          native host are both available.
+        </p>
+        <div class="command-row">
+          <code id="doctor-command">npx --yes codex-firefox-bridge@VERSION doctor</code>
+          <button id="copy-doctor-command" type="button">Copy</button>
+        </div>
+      </section>
       <section class="why" aria-labelledby="why-title">
         <h2 id="why-title">Why is this needed?</h2>
         <p>

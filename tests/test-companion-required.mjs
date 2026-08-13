@@ -6,8 +6,12 @@ const source = fs.readFileSync("extension/companion-required.js", "utf8");
 const elementIds = [
   "bridge-downloads",
   "bridge-version",
+  "chrome-prerequisite",
+  "connection-explanation",
+  "copy-doctor-command",
   "copy-npm-command",
   "developer-install",
+  "doctor-command",
   "eyebrow",
   "extension-update-section",
   "extension-version",
@@ -57,6 +61,9 @@ assert.equal(olderBridge.get("bridge-version").textContent, "v1.4.6");
 assert.equal(olderBridge.get("version-status").hidden, false);
 assert.equal(olderBridge.get("extension-update-section").hidden, true);
 assert.equal(olderBridge.get("npm-command").textContent, "npx --yes codex-firefox-bridge@1.4.7 install");
+assert.equal(olderBridge.get("doctor-command").textContent, "npx --yes codex-firefox-bridge@1.4.7 doctor");
+assert.equal(olderBridge.get("connection-explanation").hidden, true);
+assert.equal(olderBridge.get("chrome-prerequisite").hidden, true);
 assert.match(olderBridge.get("page-lede").textContent, /Update the bridge/u);
 
 const olderExtension = await render("?reason=version-mismatch&extensionVersion=1.4.7&bridgeVersion=1.4.8");

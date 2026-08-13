@@ -172,19 +172,6 @@
       }
       firefox.action.setBadgeBackgroundColor({ color: "#d97706" }).catch(() => {});
       firefox.action.setBadgeText({ text: "SETUP" }).catch(() => {});
-      const storageKey = `companionSetupPromptShown:${firefox.runtime.getManifest().version}`;
-      firefox.storage.local.get(storageKey).then((stored) => {
-        if (stored[storageKey]) {
-          return;
-        }
-        return firefox.storage.local
-          .set({ [storageKey]: true })
-          .then(() =>
-            firefox.tabs.create({
-              url: firefox.runtime.getURL("companion-required.html"),
-            }),
-          );
-      }).catch(() => {});
     });
 
     const onMessage = {

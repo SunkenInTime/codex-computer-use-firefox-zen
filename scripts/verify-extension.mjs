@@ -52,7 +52,13 @@ for (const contentScript of manifest.content_scripts ?? []) {
 }
 
 assert(existsInExtension(manifest.sidebar_action.default_panel), "The ChatGPT sidebar HTML is missing.");
-for (const setupFile of ["companion-required.html", "companion-required.css", "companion-required.js"]) {
+for (const setupFile of [
+  "companion-required.html",
+  "companion-required.css",
+  "companion-required.js",
+  "codex-sidepanel/firefox-companion-setup.css",
+  "codex-sidepanel/firefox-companion-setup.js",
+]) {
   assert(existsInExtension(setupFile), `Missing companion setup asset: ${setupFile}`);
 }
 new vm.Script(read("extension/companion-required.js"), { filename: "companion-required.js" });
@@ -61,6 +67,8 @@ assert(setupHtml.includes("codex-firefox-bridge@"), "The npm installation path i
 assert(setupHtml.includes("https://addons.mozilla.org/firefox/addon/codex-computer-use-for-zen/"), "The signed Firefox extension update path is missing from setup.");
 assert(setupHtml.includes('id="version-status"'), "The setup page cannot show installed version details.");
 assert(setupHtml.includes("Why is this needed?"), "The setup page must explain why the companion is required.");
+assert(setupHtml.includes("Plugins → Chrome"), "The setup page must explain how to register the OpenAI native host.");
+assert(setupHtml.includes("doctor-command"), "The setup page must include bridge diagnostics.");
 for (const size of ["16", "24", "32", "48", "64", "96", "128"]) {
   assert(size in manifest.icons, `Missing ${size}px icon declaration.`);
 }
@@ -74,8 +82,13 @@ for (const match of sidebarHtml.matchAll(/(?:src|href)="\.\/([^"?#]+)"/gu)) {
 }
 
 const compatibilitySource = read("extension/firefox-compat.js");
-assert(compatibilitySource.includes("companionSetupPromptShown:"), "Missing one-time companion setup guidance.");
 assert(compatibilitySource.includes("companionVersionMismatchPromptShown:"), "Missing bridge version mismatch guidance.");
+assert(!compatibilitySource.includes('tabs.create({\n              url: firefox.runtime.getURL("companion-required.html")'), "Companion setup must not open a surprise tab.");
+const sidebarSetupSource = read("extension/codex-sidepanel/firefox-companion-setup.js");
+assert(sidebarSetupSource.includes("Native transport disconnected"), "Sidebar setup must recognize a disconnected native transport.");
+assert(sidebarSetupSource.includes("Install for Windows"), "Sidebar setup is missing the Windows installer.");
+assert(sidebarSetupSource.includes("Install for macOS"), "Sidebar setup is missing the macOS installer.");
+assert(sidebarSetupSource.includes("Plugins → Chrome"), "Sidebar setup must explain the required OpenAI native-host registration.");
 const coreCdpMethods = [
   "DOM.describeNode",
   "DOM.getBoxModel",

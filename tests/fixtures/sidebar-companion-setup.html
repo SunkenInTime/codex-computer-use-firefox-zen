@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en" data-codex-window-type="chrome-extension">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Firefox companion setup preview</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --color-token-main-surface-primary: #181818;
+        --color-token-foreground: #fff;
+        --color-token-text-secondary: rgba(255, 255, 255, 0.7);
+        --color-token-text-tertiary: rgba(255, 255, 255, 0.5);
+        --color-token-border: rgba(255, 255, 255, 0.08);
+        --color-token-border-heavy: rgba(255, 255, 255, 0.16);
+        --color-background-elevated-secondary: rgba(255, 255, 255, 0.03);
+        --color-background-button-secondary: rgba(255, 255, 255, 0.06);
+        --color-accent-orange: #fb6a22;
+        --color-border-focus: #339cff;
+        --gray-100: #ededed;
+        --gray-1000: #0d0d0d;
+        --radius-lg: 10px;
+        --radius-xl: 12px;
+        --radius-2xl: 16px;
+        --radius-3xl: 20px;
+      }
+      html, body, #root { height: 100%; margin: 0; }
+    </style>
+    <link rel="stylesheet" href="../../extension/codex-sidepanel/firefox-companion-setup.css">
+  </head>
+  <body>
+    <div id="root">Native transport disconnected</div>
+    <script type="module">
+      import { installFirefoxCompanionSetup } from "../../extension/codex-sidepanel/firefox-companion-setup.js";
+
+      const extension = {
+        runtime: {
+          getManifest: () => ({ version: "1.4.7" }),
+          getPlatformInfo: async () => ({ os: "win" }),
+          getURL: (path) => `../../extension/${path}`,
+        },
+      };
+      installFirefoxCompanionSetup({
+        extension,
+        root: document.querySelector("#root"),
+        reload: () => {},
+      });
+    </script>
+  </body>
+</html>

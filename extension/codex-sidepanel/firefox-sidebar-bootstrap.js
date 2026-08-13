@@ -1,4 +1,5 @@
 import { ensureFirefoxHostAccess } from "./firefox-host-access.js";
+import { installFirefoxCompanionSetup } from "./firefox-companion-setup.js";
 
 const extension = globalThis.browser ?? globalThis.chrome;
 const isFirefox = /Firefox\//.test(navigator.userAgent);
@@ -6,6 +7,7 @@ const isFirefox = /Firefox\//.test(navigator.userAgent);
 if (isFirefox && !await ensureFirefoxHostAccess({ extension })) {
   // The permission prompt owns the sidebar until Firefox grants website access.
 } else if (isFirefox) {
+  installFirefoxCompanionSetup({ extension });
   // The Firefox port supplies open-tab mentions directly through its own
   // privileged runtime. The inherited UI otherwise waits for a Chrome-only
   // plugin-discovery flag and discards valid Firefox tab candidates.
