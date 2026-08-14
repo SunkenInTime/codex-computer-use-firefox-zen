@@ -43,6 +43,8 @@ assert.match(css, /firefox-companion-setup__developer--recommended/u);
 const setupSource = fs.readFileSync("extension/codex-sidepanel/firefox-companion-setup.js", "utf8");
 assert.match(setupSource, /Download Linux binary/u);
 assert.match(setupSource, /Recommended on Linux/u);
+assert.match(setupSource, /os === "linux" && arch === "x86-64"/u);
+assert.match(setupSource, /Unsupported Linux architecture/u);
 assert.doesNotMatch(setupSource, /os === "linux" \? linux/u);
 
 console.log(JSON.stringify({

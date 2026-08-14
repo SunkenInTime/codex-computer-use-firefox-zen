@@ -69,6 +69,7 @@ assert(setupHtml.includes('id="version-status"'), "The setup page cannot show in
 assert(setupHtml.includes('id="linux-download"'), "The setup page is missing the Linux companion download.");
 assert(setupHtml.includes("Download Linux binary"), "The setup page must not present the Linux binary as an installer.");
 assert(setupHtml.includes('id="developer-install-label"'), "The setup page cannot mark npm as the recommended Linux path.");
+assert(setupHtml.includes('aria-labelledby="developer-install-label developer-install-title"'), "The npm setup section must include its path label in the accessible name.");
 assert(setupHtml.includes("Why is this needed?"), "The setup page must explain why the companion is required.");
 assert(setupHtml.includes("Plugins → Chrome"), "The setup page must explain how to register the OpenAI native host.");
 assert(setupHtml.includes("doctor-command"), "The setup page must include bridge diagnostics.");
@@ -93,6 +94,7 @@ assert(sidebarSetupSource.includes("Install for Windows"), "Sidebar setup is mis
 assert(sidebarSetupSource.includes("Install for macOS"), "Sidebar setup is missing the macOS installer.");
 assert(sidebarSetupSource.includes("Download Linux binary"), "Sidebar setup is missing the Linux binary download.");
 assert(sidebarSetupSource.includes("Recommended on Linux"), "Sidebar setup must recommend the npm installer on Linux.");
+assert(sidebarSetupSource.includes('arch === "x86-64"'), "Sidebar setup must not recommend npm on unsupported Linux architectures.");
 assert(sidebarSetupSource.includes("Plugins → Chrome"), "Sidebar setup must explain the required OpenAI native-host registration.");
 const coreCdpMethods = [
   "DOM.describeNode",

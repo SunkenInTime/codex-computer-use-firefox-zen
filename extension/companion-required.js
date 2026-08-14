@@ -55,17 +55,21 @@
   configureCopyButton(copyNpmCommand, npmCommand, command);
   configureCopyButton(copyDoctorCommand, doctorCommand, doctor);
 
-  browser.runtime.getPlatformInfo().then(({ os }) => {
+  browser.runtime.getPlatformInfo().then(({ os, arch }) => {
     if (os === "win") {
       windows.classList.add("recommended");
     } else if (os === "mac") {
       macos.classList.add("recommended");
-    } else if (os === "linux") {
+    } else if (os === "linux" && arch === "x86-64") {
       developerInstall.classList.add("recommended");
       developerInstall.setAttribute("aria-label", "Install with npm — recommended for this device");
       developerInstallLabel.textContent = "Recommended on Linux";
       developerInstallCopy.textContent =
         "This downloads, installs, and registers the Linux bridge for Firefox and Zen. It remains installed after the command exits.";
+    } else if (os === "linux") {
+      developerInstallLabel.textContent = "Unsupported Linux architecture";
+      developerInstallCopy.textContent =
+        "The Firefox companion currently ships a Linux x64 bridge only. This device is not x86-64, so the npm installer cannot register a matching binary.";
     }
   }).catch(() => {});
 

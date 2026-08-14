@@ -28,13 +28,33 @@ const packageJson = JSON.parse(
 const version = packageJson.version;
 const command = process.argv[2] ?? "help";
 
-function writeManifest(manifestPath, binaryPath) {
-  fs.mkdirSync(path.dirname(manifestPath), { recursive: true });
-  fs.writeFileSync(
-    manifestPath,
-    `${JSON.stringify(nativeManifest(binaryPath), null, 2)}\n`,
-    "utf8"
-  );
+function writeManifests(manifestList, binaryPath) {
+  const staged = [];
+  const committed = [];
+  try {
+    for (const manifestPath of manifestList) {
+      fs.mkdirSync(path.dirname(manifestPath), { recursive: true });
+      const temporaryPath = `${manifestPath}.${process.pid}.tmp`;
+      fs.writeFileSync(
+        temporaryPath,
+        `${JSON.stringify(nativeManifest(binaryPath), null, 2)}\n`,
+        "utf8"
+      );
+      staged.push({ temporaryPath, manifestPath });
+    }
+    for (const { temporaryPath, manifestPath } of staged) {
+      fs.renameSync(temporaryPath, manifestPath);
+      committed.push(manifestPath);
+    }
+  } catch (error) {
+    for (const { temporaryPath } of staged) {
+      fs.rmSync(temporaryPath, { force: true });
+    }
+    for (const manifestPath of committed) {
+      fs.rmSync(manifestPath, { force: true });
+    }
+    throw error;
+  }
 }
 
 function registerWindows(manifestPath, registryKey) {
@@ -78,15 +98,16 @@ async function install() {
   }
 
   fs.mkdirSync(directory, { recursive: true });
+  for (const manifestPath of manifestPaths(locations)) {
+    fs.mkdirSync(path.dirname(manifestPath), { recursive: true });
+  }
   const temporaryPath = `${binaryPath}.${process.pid}.tmp`;
   fs.writeFileSync(temporaryPath, binary, { mode: 0o755 });
   fs.renameSync(temporaryPath, binaryPath);
   if (process.platform !== "win32") {
     fs.chmodSync(binaryPath, 0o755);
   }
-  for (const manifestPath of manifestPaths(locations)) {
-    writeManifest(manifestPath, binaryPath);
-  }
+  writeManifests(manifestPaths(locations), binaryPath);
   if (process.platform === "win32") {
     registerWindows(locations.manifest, locations.registryKey);
   }
@@ -101,9 +122,13 @@ async function install() {
 
 function doctor() {
   const locations = installLocations();
-  const registered = manifestPaths(locations).map((manifestPath) =>
-    readInstalledManifest(manifestPath)
-  );
+  const registered = [];
+  for (const manifestPath of manifestPaths(locations)) {
+    if (!fs.existsSync(manifestPath)) {
+      throw new Error(`Native-host manifest is missing: ${manifestPath}`);
+    }
+    registered.push(readInstalledManifest(manifestPath));
+  }
   const manifest = registered[0];
   if (!fs.existsSync(manifest.path)) {
     throw new Error(`Registered bridge binary is missing: ${manifest.path}`);

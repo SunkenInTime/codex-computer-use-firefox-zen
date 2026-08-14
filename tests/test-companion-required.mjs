@@ -6,6 +6,7 @@ const source = fs.readFileSync("extension/companion-required.js", "utf8");
 const html = fs.readFileSync("extension/companion-required.html", "utf8");
 assert.match(html, /Download Linux binary/u);
 assert.match(html, /id="developer-install-label"/u);
+assert.match(html, /aria-labelledby="developer-install-label developer-install-title"/u);
 assert.doesNotMatch(html, /Install for Linux/u);
 
 const elementIds = [
@@ -34,7 +35,7 @@ const elementIds = [
   "windows-download",
 ];
 
-async function render(search, os = "mac") {
+async function render(search, os = "mac", arch = "x86-64") {
   const elements = new Map(elementIds.map((id) => [id, {
     addEventListener() {},
     classList: {
@@ -44,14 +45,15 @@ async function render(search, os = "mac") {
     hidden: id === "extension-update-section" || id === "version-status",
     href: "",
     textContent: "",
-    setAttribute() {},
+    attributes: {},
+    setAttribute(name, value) { this.attributes[name] = value; },
   }]));
   const context = vm.createContext({
     URLSearchParams,
     browser: {
       runtime: {
         getManifest() { return { version: "1.4.7" }; },
-        async getPlatformInfo() { return { os }; },
+        async getPlatformInfo() { return { os, arch }; },
       },
     },
     document: {
@@ -99,8 +101,18 @@ assert.deepEqual(macosSetup.get("developer-install").classList.added, []);
 const linuxSetup = await render("", "linux");
 assert.deepEqual(linuxSetup.get("linux-download").classList.added, []);
 assert.deepEqual(linuxSetup.get("developer-install").classList.added, ["recommended"]);
+assert.equal(
+  linuxSetup.get("developer-install").attributes["aria-label"],
+  "Install with npm — recommended for this device",
+);
 assert.equal(linuxSetup.get("developer-install-label").textContent, "Recommended on Linux");
 assert.match(linuxSetup.get("developer-install-copy").textContent, /registers the Linux bridge/u);
+
+const linuxArmSetup = await render("", "linux", "arm");
+assert.deepEqual(linuxArmSetup.get("developer-install").classList.added, []);
+assert.equal(linuxArmSetup.get("developer-install").attributes["aria-label"], undefined);
+assert.equal(linuxArmSetup.get("developer-install-label").textContent, "Unsupported Linux architecture");
+assert.match(linuxArmSetup.get("developer-install-copy").textContent, /Linux x64 bridge only/u);
 
 console.log(JSON.stringify({
   ok: true,
@@ -108,4 +120,5 @@ console.log(JSON.stringify({
   olderExtensionRecovery: true,
   legacyBridgeRecovery: true,
   linuxRecommendsNpm: true,
+  linuxArmUnsupported: true,
 }, null, 2));

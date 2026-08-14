@@ -251,13 +251,19 @@ export function renderFirefoxCompanionSetup({
   guide.target = "_blank";
   guide.rel = "noopener noreferrer";
 
-  extension.runtime.getPlatformInfo().then(({ os }) => {
-    if (os === "linux") {
+  extension.runtime.getPlatformInfo().then(({ os, arch }) => {
+    if (os === "linux" && arch === "x86-64") {
       developerLabel.textContent = "Recommended on Linux";
       developerCopy.textContent =
         "This downloads, installs, and registers the Linux bridge for Firefox and Zen.";
       developer.classList.add("firefox-companion-setup__developer--recommended");
       developer.setAttribute("aria-label", "Install with npm — recommended for this device");
+      return;
+    }
+    if (os === "linux") {
+      developerLabel.textContent = "Unsupported Linux architecture";
+      developerCopy.textContent =
+        "The Firefox companion currently ships a Linux x64 bridge only. This device is not x86-64, so the npm installer cannot register a matching binary.";
       return;
     }
     const recommended = os === "win" ? windows : os === "mac" ? macos : null;
