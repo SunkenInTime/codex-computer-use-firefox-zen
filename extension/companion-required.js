@@ -7,6 +7,9 @@
   const windows = document.querySelector("#windows-download");
   const macos = document.querySelector("#macos-download");
   const linux = document.querySelector("#linux-download");
+  const developerInstall = document.querySelector("#developer-install");
+  const developerInstallLabel = document.querySelector("#developer-install-label");
+  const developerInstallCopy = document.querySelector("#developer-install-copy");
   const npmCommand = document.querySelector("#npm-command");
   const copyNpmCommand = document.querySelector("#copy-npm-command");
   const doctorCommand = document.querySelector("#doctor-command");
@@ -58,7 +61,11 @@
     } else if (os === "mac") {
       macos.classList.add("recommended");
     } else if (os === "linux") {
-      linux.classList.add("recommended");
+      developerInstall.classList.add("recommended");
+      developerInstall.setAttribute("aria-label", "Install with npm — recommended for this device");
+      developerInstallLabel.textContent = "Recommended on Linux";
+      developerInstallCopy.textContent =
+        "This downloads, installs, and registers the Linux bridge for Firefox and Zen. It remains installed after the command exits.";
     }
   }).catch(() => {});
 

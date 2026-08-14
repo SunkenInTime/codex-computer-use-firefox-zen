@@ -191,17 +191,17 @@ export function renderFirefoxCompanionSetup({
     label: "Install for macOS",
     platform: "mac",
   });
-  const linux = appendDownload(document, downloads, {
-    description: "x64 binary · Firefox and Zen",
+  appendDownload(document, downloads, {
+    description: "Raw x64 binary · not an installer",
     href: details.linuxUrl,
-    label: "Install for Linux",
+    label: "Download Linux binary",
     platform: "linux",
   });
 
   const developer = appendElement(document, panel, "section", "firefox-companion-setup__developer");
-  appendElement(document, developer, "p", "firefox-companion-setup__option-label", "Developer path");
+  const developerLabel = appendElement(document, developer, "p", "firefox-companion-setup__option-label", "Developer path");
   appendElement(document, developer, "h2", "", "Install with npm");
-  appendElement(
+  const developerCopy = appendElement(
     document,
     developer,
     "p",
@@ -252,7 +252,15 @@ export function renderFirefoxCompanionSetup({
   guide.rel = "noopener noreferrer";
 
   extension.runtime.getPlatformInfo().then(({ os }) => {
-    const recommended = os === "win" ? windows : os === "mac" ? macos : os === "linux" ? linux : null;
+    if (os === "linux") {
+      developerLabel.textContent = "Recommended on Linux";
+      developerCopy.textContent =
+        "This downloads, installs, and registers the Linux bridge for Firefox and Zen.";
+      developer.classList.add("firefox-companion-setup__developer--recommended");
+      developer.setAttribute("aria-label", "Install with npm — recommended for this device");
+      return;
+    }
+    const recommended = os === "win" ? windows : os === "mac" ? macos : null;
     if (recommended != null) {
       recommended.classList.add("firefox-companion-setup__download--recommended");
       const label = recommended.querySelector("strong")?.textContent ?? "Platform installer";

@@ -187,6 +187,20 @@ function stopWindowsBridgeProcesses(directory) {
 function uninstall() {
   const locations = installLocations();
   const directory = assertSafeInstallDirectory(locations.directory);
+  const removableManifests = [];
+  for (const manifestPath of manifestPaths(locations)) {
+    if (!fs.existsSync(manifestPath)) {
+      continue;
+    }
+    try {
+      readInstalledManifest(manifestPath);
+    } catch (error) {
+      throw new Error(
+        `Refusing to remove an unfamiliar native-host manifest: ${error.message}`
+      );
+    }
+    removableManifests.push(manifestPath);
+  }
   if (process.platform === "win32") {
     try {
       execFileSync("reg", ["delete", locations.registryKey, "/f"], {
@@ -196,18 +210,8 @@ function uninstall() {
       // The registration may already be absent.
     }
   }
-  for (const manifestPath of manifestPaths(locations)) {
-    if (!fs.existsSync(manifestPath)) {
-      continue;
-    }
-    try {
-      readInstalledManifest(manifestPath);
-      fs.rmSync(manifestPath, { force: true });
-    } catch (error) {
-      throw new Error(
-        `Refusing to remove an unfamiliar native-host manifest: ${error.message}`
-      );
-    }
+  for (const manifestPath of removableManifests) {
+    fs.rmSync(manifestPath, { force: true });
   }
   if (process.platform === "win32") {
     stopWindowsBridgeProcesses(directory);

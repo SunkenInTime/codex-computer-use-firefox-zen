@@ -163,7 +163,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
       - uses: dtolnay/rust-toolchain@stable
+      - run: npm test
       - run: cargo test --manifest-path native-host/Cargo.toml
       - run: cargo build --release --locked --manifest-path native-host/Cargo.toml
       - name: Package Linux binary

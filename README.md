@@ -37,7 +37,7 @@ This is an independent compatibility project—not an official OpenAI, Mozilla, 
 
 ### 2. Install the matching native bridge
 
-The add-on opens a one-time setup page with Windows, macOS, and Linux packages. You can also install the same per-user bridge from npm:
+The add-on opens a one-time setup page with Windows and macOS installers. On Linux, use the npm command below; the GitHub Linux asset is a raw binary, not an installer.
 
 ```sh
 npx --yes codex-firefox-bridge@latest install
@@ -49,7 +49,7 @@ The bridge remains installed after `npx` exits. Check it at any time with:
 npx --yes codex-firefox-bridge@latest doctor
 ```
 
-Windows, universal Apple Silicon/Intel macOS, and Linux x64 packages are also attached to every [GitHub release](https://github.com/SunkenInTime/codex-computer-use-firefox-zen/releases/latest).
+Windows and universal Apple Silicon/Intel macOS installers are attached to every [GitHub release](https://github.com/SunkenInTime/codex-computer-use-firefox-zen/releases/latest), along with the Linux x64 binary used by the npm installer.
 
 ### 3. Open the sidebar
 

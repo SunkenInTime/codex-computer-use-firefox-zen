@@ -38,6 +38,12 @@ assert.ok(
 );
 assert.match(css, /height: 100vh/u);
 assert.match(css, /overflow-y: auto/u);
+assert.match(css, /firefox-companion-setup__developer--recommended/u);
+
+const setupSource = fs.readFileSync("extension/codex-sidepanel/firefox-companion-setup.js", "utf8");
+assert.match(setupSource, /Download Linux binary/u);
+assert.match(setupSource, /Recommended on Linux/u);
+assert.doesNotMatch(setupSource, /os === "linux" \? linux/u);
 
 console.log(JSON.stringify({
   ok: true,

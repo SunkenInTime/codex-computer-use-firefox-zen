@@ -67,6 +67,8 @@ assert(setupHtml.includes("codex-firefox-bridge@"), "The npm installation path i
 assert(setupHtml.includes("https://addons.mozilla.org/firefox/addon/codex-computer-use-for-zen/"), "The signed Firefox extension update path is missing from setup.");
 assert(setupHtml.includes('id="version-status"'), "The setup page cannot show installed version details.");
 assert(setupHtml.includes('id="linux-download"'), "The setup page is missing the Linux companion download.");
+assert(setupHtml.includes("Download Linux binary"), "The setup page must not present the Linux binary as an installer.");
+assert(setupHtml.includes('id="developer-install-label"'), "The setup page cannot mark npm as the recommended Linux path.");
 assert(setupHtml.includes("Why is this needed?"), "The setup page must explain why the companion is required.");
 assert(setupHtml.includes("Plugins → Chrome"), "The setup page must explain how to register the OpenAI native host.");
 assert(setupHtml.includes("doctor-command"), "The setup page must include bridge diagnostics.");
@@ -89,7 +91,8 @@ const sidebarSetupSource = read("extension/codex-sidepanel/firefox-companion-set
 assert(sidebarSetupSource.includes("Native transport disconnected"), "Sidebar setup must recognize a disconnected native transport.");
 assert(sidebarSetupSource.includes("Install for Windows"), "Sidebar setup is missing the Windows installer.");
 assert(sidebarSetupSource.includes("Install for macOS"), "Sidebar setup is missing the macOS installer.");
-assert(sidebarSetupSource.includes("Install for Linux"), "Sidebar setup is missing the Linux installer.");
+assert(sidebarSetupSource.includes("Download Linux binary"), "Sidebar setup is missing the Linux binary download.");
+assert(sidebarSetupSource.includes("Recommended on Linux"), "Sidebar setup must recommend the npm installer on Linux.");
 assert(sidebarSetupSource.includes("Plugins → Chrome"), "Sidebar setup must explain the required OpenAI native-host registration.");
 const coreCdpMethods = [
   "DOM.describeNode",

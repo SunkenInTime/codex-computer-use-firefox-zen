@@ -248,7 +248,8 @@ section.downloads {
   background: var(--surface-secondary);
 }
 
-.download.recommended {
+.download.recommended,
+.developer-install.recommended {
   border-color: var(--border-heavy);
   background: var(--surface-secondary);
 }
