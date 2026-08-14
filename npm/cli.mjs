@@ -14,6 +14,7 @@ import {
   expectedChecksum,
   installLocations,
   isInstalledBridgeBinary,
+  manifestPaths,
   nativeManifest,
   platformAsset,
   readInstalledManifest,
@@ -83,22 +84,36 @@ async function install() {
   if (process.platform !== "win32") {
     fs.chmodSync(binaryPath, 0o755);
   }
-  writeManifest(locations.manifest, binaryPath);
+  for (const manifestPath of manifestPaths(locations)) {
+    writeManifest(manifestPath, binaryPath);
+  }
   if (process.platform === "win32") {
     registerWindows(locations.manifest, locations.registryKey);
   }
 
   console.log(`Installed Codex Firefox Bridge ${version}`);
   console.log(`Binary: ${binaryPath}`);
-  console.log(`Manifest: ${locations.manifest}`);
+  for (const manifestPath of manifestPaths(locations)) {
+    console.log(`Manifest: ${manifestPath}`);
+  }
   doctor();
 }
 
 function doctor() {
   const locations = installLocations();
-  const manifest = readInstalledManifest(locations.manifest);
+  const registered = manifestPaths(locations).map((manifestPath) =>
+    readInstalledManifest(manifestPath)
+  );
+  const manifest = registered[0];
   if (!fs.existsSync(manifest.path)) {
     throw new Error(`Registered bridge binary is missing: ${manifest.path}`);
+  }
+  for (const extra of registered.slice(1)) {
+    if (extra.path !== manifest.path) {
+      throw new Error(
+        `Native-host manifests point at different binaries: ${manifest.path} vs ${extra.path}`
+      );
+    }
   }
   if (process.platform === "win32") {
     const registration = execFileSync(
@@ -181,10 +196,13 @@ function uninstall() {
       // The registration may already be absent.
     }
   }
-  if (fs.existsSync(locations.manifest)) {
+  for (const manifestPath of manifestPaths(locations)) {
+    if (!fs.existsSync(manifestPath)) {
+      continue;
+    }
     try {
-      readInstalledManifest(locations.manifest);
-      fs.rmSync(locations.manifest, { force: true });
+      readInstalledManifest(manifestPath);
+      fs.rmSync(manifestPath, { force: true });
     } catch (error) {
       throw new Error(
         `Refusing to remove an unfamiliar native-host manifest: ${error.message}`

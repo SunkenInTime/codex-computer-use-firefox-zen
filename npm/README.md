@@ -9,7 +9,12 @@ npx --yes codex-firefox-bridge install
 
 The command downloads the matching bridge from the GitHub release, verifies its
 published SHA-256 checksum, installs it in the current user's application-data
-directory, registers it with Firefox, and runs a diagnostic.
+directory, registers it with Firefox and Zen Browser, and runs a diagnostic.
+
+On Linux the binary is installed under `$XDG_DATA_HOME/Codex Firefox Bridge`
+(default `~/.local/share/Codex Firefox Bridge`) and native-host manifests are
+written to `~/.mozilla/native-messaging-hosts/` and
+`~/.zen/native-messaging-hosts/`.
 
 ```sh
 npx --yes codex-firefox-bridge doctor

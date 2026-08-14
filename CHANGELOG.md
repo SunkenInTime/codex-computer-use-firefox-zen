@@ -14,6 +14,8 @@ Git tag.
   snapshot routing, node resolution, and accurate unsupported-evaluation error.
 - Corrected mouse-move button state, `char` key insertion, DOM-snapshot text
   duplication and recursion, and structured Firefox script-error reporting.
+- Added Linux x64 native-bridge packaging, Firefox/Zen native-host registration,
+  ChatGPT host discovery, and native-protocol coverage.
 
 ## 1.4.7 - 2026-08-12
 

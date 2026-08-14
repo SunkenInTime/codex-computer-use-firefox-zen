@@ -22,6 +22,7 @@ export function getFirefoxCompanionSetupDetails(version) {
     doctorCommand: `npx --yes codex-firefox-bridge@${version} doctor`,
     macosUrl: `${releaseBase}/codex-firefox-bridge-${version}-macos-universal.pkg`,
     windowsUrl: `${releaseBase}/codex-firefox-bridge-${version}-windows-x64-setup.exe`,
+    linuxUrl: `${releaseBase}/codex-firefox-bridge-${version}-linux-x64`,
   };
 }
 
@@ -190,6 +191,12 @@ export function renderFirefoxCompanionSetup({
     label: "Install for macOS",
     platform: "mac",
   });
+  const linux = appendDownload(document, downloads, {
+    description: "x64 binary · Firefox and Zen",
+    href: details.linuxUrl,
+    label: "Install for Linux",
+    platform: "linux",
+  });
 
   const developer = appendElement(document, panel, "section", "firefox-companion-setup__developer");
   appendElement(document, developer, "p", "firefox-companion-setup__option-label", "Developer path");
@@ -245,7 +252,7 @@ export function renderFirefoxCompanionSetup({
   guide.rel = "noopener noreferrer";
 
   extension.runtime.getPlatformInfo().then(({ os }) => {
-    const recommended = os === "win" ? windows : os === "mac" ? macos : null;
+    const recommended = os === "win" ? windows : os === "mac" ? macos : os === "linux" ? linux : null;
     if (recommended != null) {
       recommended.classList.add("firefox-companion-setup__download--recommended");
       const label = recommended.querySelector("strong")?.textContent ?? "Platform installer";

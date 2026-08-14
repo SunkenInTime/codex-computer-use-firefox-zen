@@ -16,6 +16,7 @@ const elementIds = [
   "extension-update-section",
   "extension-version",
   "macos-download",
+  "linux-download",
   "npm-command",
   "page-lede",
   "page-title",
@@ -62,6 +63,7 @@ assert.equal(olderBridge.get("version-status").hidden, false);
 assert.equal(olderBridge.get("extension-update-section").hidden, true);
 assert.equal(olderBridge.get("npm-command").textContent, "npx --yes codex-firefox-bridge@1.4.7 install");
 assert.equal(olderBridge.get("doctor-command").textContent, "npx --yes codex-firefox-bridge@1.4.7 doctor");
+assert.match(olderBridge.get("linux-download").href, /codex-firefox-bridge-1\.4\.7-linux-x64$/u);
 assert.equal(olderBridge.get("connection-explanation").hidden, true);
 assert.equal(olderBridge.get("chrome-prerequisite").hidden, true);
 assert.match(olderBridge.get("page-lede").textContent, /Update the bridge/u);

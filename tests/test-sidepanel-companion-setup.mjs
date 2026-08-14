@@ -24,6 +24,7 @@ assert.equal(details.doctorCommand, "npx --yes codex-firefox-bridge@1.2.3 doctor
 assert.match(details.chromeSetupUrl, /^https:\/\/learn\.chatgpt\.com\/docs\/chrome-extension/u);
 assert.match(details.windowsUrl, /v1\.2\.3\/codex-firefox-bridge-1\.2\.3-windows-x64-setup\.exe$/u);
 assert.match(details.macosUrl, /v1\.2\.3\/codex-firefox-bridge-1\.2\.3-macos-universal\.pkg$/u);
+assert.match(details.linuxUrl, /v1\.2\.3\/codex-firefox-bridge-1\.2\.3-linux-x64$/u);
 
 const html = fs.readFileSync("extension/codex-sidepanel/index.html", "utf8");
 const bootstrap = fs.readFileSync("extension/codex-sidepanel/firefox-sidebar-bootstrap.js", "utf8");

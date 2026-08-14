@@ -15,6 +15,9 @@ export function platformAsset(version, platform = process.platform, arch = proce
   if (platform === "darwin" && (arch === "arm64" || arch === "x64")) {
     return `codex-firefox-bridge-${version}-macos-universal`;
   }
+  if (platform === "linux" && arch === "x64") {
+    return `codex-firefox-bridge-${version}-linux-x64`;
+  }
   throw new Error(
     `Unsupported platform: ${platform}/${arch}. Use the platform installer from the GitHub release.`
   );
@@ -26,6 +29,9 @@ export function checksumAsset(version, platform = process.platform) {
   }
   if (platform === "darwin") {
     return `codex-firefox-bridge-${version}-macos-universal.sha256`;
+  }
+  if (platform === "linux") {
+    return `codex-firefox-bridge-${version}-linux-x64.sha256`;
   }
   throw new Error(`Unsupported platform: ${platform}`);
 }
@@ -96,9 +102,11 @@ export function installLocations(
       throw new Error("LOCALAPPDATA is unavailable.");
     }
     const directory = platformPath.join(localAppData, "Codex Firefox Bridge");
+    const manifest = platformPath.join(directory, `${HOST_NAME}.json`);
     return {
       directory,
-      manifest: platformPath.join(directory, `${HOST_NAME}.json`),
+      manifest,
+      manifests: [manifest],
       registryKey: `HKCU\\Software\\Mozilla\\NativeMessagingHosts\\${HOST_NAME}`
     };
   }
@@ -109,19 +117,49 @@ export function installLocations(
       "Application Support",
       "Codex Firefox Bridge"
     );
+    const manifest = platformPath.join(
+      home,
+      "Library",
+      "Application Support",
+      "Mozilla",
+      "NativeMessagingHosts",
+      `${HOST_NAME}.json`
+    );
     return {
       directory,
-      manifest: platformPath.join(
+      manifest,
+      manifests: [manifest]
+    };
+  }
+  if (platform === "linux") {
+    const dataHome =
+      environment.XDG_DATA_HOME || platformPath.join(home, ".local", "share");
+    const directory = platformPath.join(dataHome, "Codex Firefox Bridge");
+    const manifests = [
+      platformPath.join(
         home,
-        "Library",
-        "Application Support",
-        "Mozilla",
-        "NativeMessagingHosts",
+        ".mozilla",
+        "native-messaging-hosts",
+        `${HOST_NAME}.json`
+      ),
+      platformPath.join(
+        home,
+        ".zen",
+        "native-messaging-hosts",
         `${HOST_NAME}.json`
       )
+    ];
+    return {
+      directory,
+      manifest: manifests[0],
+      manifests
     };
   }
   throw new Error(`Unsupported platform: ${platform}`);
+}
+
+export function manifestPaths(locations) {
+  return locations.manifests ?? [locations.manifest];
 }
 
 export function nativeManifest(binaryPath) {

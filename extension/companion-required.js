@@ -6,6 +6,7 @@
     `https://github.com/SunkenInTime/codex-computer-use-firefox-zen/releases/download/v${version}`;
   const windows = document.querySelector("#windows-download");
   const macos = document.querySelector("#macos-download");
+  const linux = document.querySelector("#linux-download");
   const npmCommand = document.querySelector("#npm-command");
   const copyNpmCommand = document.querySelector("#copy-npm-command");
   const doctorCommand = document.querySelector("#doctor-command");
@@ -44,6 +45,8 @@
     `${releaseBase}/codex-firefox-bridge-${version}-windows-x64-setup.exe`;
   macos.href =
     `${releaseBase}/codex-firefox-bridge-${version}-macos-universal.pkg`;
+  linux.href =
+    `${releaseBase}/codex-firefox-bridge-${version}-linux-x64`;
   npmCommand.textContent = command;
   doctorCommand.textContent = doctor;
   configureCopyButton(copyNpmCommand, npmCommand, command);
@@ -54,6 +57,8 @@
       windows.classList.add("recommended");
     } else if (os === "mac") {
       macos.classList.add("recommended");
+    } else if (os === "linux") {
+      linux.classList.add("recommended");
     }
   }).catch(() => {});
 
