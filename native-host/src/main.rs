@@ -136,13 +136,52 @@ fn app_server_resource_candidates() -> Vec<PathBuf> {
     if let Some(resources) = env::var_os("CODEX_FIREFOX_CHATGPT_RESOURCES") {
         candidates.push(PathBuf::from(resources));
     }
-    if cfg!(target_os = "macos") {
-        candidates.push(PathBuf::from(
-            "/Applications/ChatGPT.app/Contents/Resources",
-        ));
-        if let Some(home) = env::var_os("HOME").map(PathBuf::from) {
-            candidates.push(home.join("Applications/ChatGPT.app/Contents/Resources"));
+    candidates.extend(chatgpt_resource_candidates_for(
+        current_platform(),
+        env::var_os("HOME").map(PathBuf::from).as_deref(),
+    ));
+    candidates
+}
+
+fn current_platform() -> &'static str {
+    if cfg!(windows) {
+        "windows"
+    } else if cfg!(target_os = "macos") {
+        "macos"
+    } else {
+        "linux"
+    }
+}
+
+fn chatgpt_resource_candidates_for(platform: &str, home: Option<&Path>) -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+    match platform {
+        "macos" => {
+            candidates.push(PathBuf::from(
+                "/Applications/ChatGPT.app/Contents/Resources",
+            ));
+            if let Some(home) = home {
+                candidates.push(home.join("Applications/ChatGPT.app/Contents/Resources"));
+            }
         }
+        "linux" => {
+            candidates.extend([
+                PathBuf::from("/usr/lib/chatgpt/resources"),
+                PathBuf::from("/usr/lib64/chatgpt/resources"),
+                PathBuf::from("/usr/local/lib/chatgpt/resources"),
+                PathBuf::from("/opt/chatgpt/resources"),
+                PathBuf::from("/opt/ChatGPT/resources"),
+            ]);
+            if let Some(home) = home {
+                candidates.extend([
+                    home.join(".local/opt/chatgpt/resources"),
+                    home.join(".local/opt/ChatGPT/resources"),
+                    home.join(".local/share/chatgpt/resources"),
+                    home.join(".local/share/ChatGPT/resources"),
+                ]);
+            }
+        }
+        _ => {}
     }
     candidates
 }
@@ -823,15 +862,25 @@ fn native_host_manifest_candidates() -> Vec<PathBuf> {
                 .join(format!("{HOST_NAME}.json")),
         );
     } else if let Some(home) = env::var_os("HOME").map(PathBuf::from) {
-        for directory in [
-            ".config/google-chrome/NativeMessagingHosts",
-            ".config/chromium/NativeMessagingHosts",
-            ".config/BraveSoftware/Brave-Browser/NativeMessagingHosts",
-        ] {
-            candidates.push(home.join(directory).join(format!("{HOST_NAME}.json")));
-        }
+        candidates.extend(linux_chrome_native_host_manifests(&home));
     }
     candidates
+}
+
+fn linux_chrome_native_host_manifests(home: &Path) -> Vec<PathBuf> {
+    [
+        ".config/google-chrome/NativeMessagingHosts",
+        ".config/google-chrome-beta/NativeMessagingHosts",
+        ".config/google-chrome-unstable/NativeMessagingHosts",
+        ".config/chromium/NativeMessagingHosts",
+        ".config/BraveSoftware/Brave-Browser/NativeMessagingHosts",
+        ".config/microsoft-edge/NativeMessagingHosts",
+        ".var/app/com.google.Chrome/config/google-chrome/NativeMessagingHosts",
+        ".var/app/com.brave.Browser/config/BraveSoftware/Brave-Browser/NativeMessagingHosts",
+    ]
+    .into_iter()
+    .map(|directory| home.join(directory).join(format!("{HOST_NAME}.json")))
+    .collect()
 }
 
 fn bundled_host_candidates() -> Vec<PathBuf> {
@@ -840,23 +889,41 @@ fn bundled_host_candidates() -> Vec<PathBuf> {
     else {
         return Vec::new();
     };
-    let platform = if cfg!(windows) {
-        "windows"
-    } else if cfg!(target_os = "macos") {
-        "macos"
-    } else {
-        "linux"
-    };
+    let platform = current_platform();
     let architecture = if cfg!(target_arch = "aarch64") {
         "arm64"
     } else {
         "x64"
     };
-    bundled_host_candidates_for(&home, platform, architecture)
+    let mut candidates = bundled_host_candidates_for(&home, platform, architecture);
+    for resources in chatgpt_resource_candidates_for(platform, Some(&home)) {
+        candidates.extend(bundled_app_host_candidates_for(
+            &resources,
+            platform,
+            architecture,
+        ));
+    }
+    candidates
 }
 
 fn bundled_host_candidates_for(home: &Path, platform: &str, architecture: &str) -> Vec<PathBuf> {
     let base = home.join(".codex/plugins/cache/openai-bundled/chrome/latest/extension-host");
+    match platform {
+        "windows" => vec![base.join(format!("{platform}/{architecture}/extension-host.exe"))],
+        "macos" => vec![
+            base.join(format!("{platform}/{architecture}/ChatGPT for Chrome")),
+            base.join(format!("{platform}/{architecture}/extension-host")),
+        ],
+        _ => vec![base.join(format!("{platform}/{architecture}/extension-host"))],
+    }
+}
+
+fn bundled_app_host_candidates_for(
+    resources: &Path,
+    platform: &str,
+    architecture: &str,
+) -> Vec<PathBuf> {
+    let base = resources.join("plugins/openai-bundled/plugins/chrome/extension-host");
     match platform {
         "windows" => vec![base.join(format!("{platform}/{architecture}/extension-host.exe"))],
         "macos" => vec![
@@ -957,6 +1024,51 @@ mod tests {
             paths[0],
             Path::new("/Users/test/.codex/plugins/cache/openai-bundled/chrome/latest/extension-host/macos/arm64/ChatGPT for Chrome")
         );
+    }
+
+    #[test]
+    fn uses_the_official_linux_host_layout() {
+        let paths = bundled_host_candidates_for(Path::new("/home/test"), "linux", "x64");
+        assert_eq!(
+            paths[0],
+            Path::new("/home/test/.codex/plugins/cache/openai-bundled/chrome/latest/extension-host/linux/x64/extension-host")
+        );
+    }
+
+    #[test]
+    fn discovers_linux_chatgpt_app_resources() {
+        let paths = chatgpt_resource_candidates_for("linux", Some(Path::new("/home/test")));
+        assert!(paths.contains(&PathBuf::from("/usr/lib/chatgpt/resources")));
+        assert!(paths.contains(&PathBuf::from(
+            "/home/test/.local/opt/chatgpt/resources"
+        )));
+        assert!(paths.contains(&PathBuf::from(
+            "/home/test/.local/share/chatgpt/resources"
+        )));
+    }
+
+    #[test]
+    fn discovers_linux_chatgpt_bundled_extension_host() {
+        let paths = bundled_app_host_candidates_for(
+            Path::new("/usr/lib/chatgpt/resources"),
+            "linux",
+            "x64",
+        );
+        assert_eq!(
+            paths[0],
+            Path::new("/usr/lib/chatgpt/resources/plugins/openai-bundled/plugins/chrome/extension-host/linux/x64/extension-host")
+        );
+    }
+
+    #[test]
+    fn discovers_linux_chrome_native_host_manifests() {
+        let paths = linux_chrome_native_host_manifests(Path::new("/home/test"));
+        assert!(paths.contains(&PathBuf::from(
+            "/home/test/.config/google-chrome/NativeMessagingHosts/com.openai.codexextension.json"
+        )));
+        assert!(paths.contains(&PathBuf::from(
+            "/home/test/.var/app/com.google.Chrome/config/google-chrome/NativeMessagingHosts/com.openai.codexextension.json"
+        )));
     }
 
     #[test]

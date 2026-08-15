@@ -37,7 +37,7 @@ This is an independent compatibility project—not an official OpenAI, Mozilla, 
 
 ### 2. Install the matching native bridge
 
-The add-on opens a one-time setup page with signed Windows and macOS installers. You can also install the same per-user bridge from npm:
+The add-on opens a one-time setup page with Windows and macOS installers. On Linux, use the npm command below; the GitHub Linux asset is a raw binary, not an installer.
 
 ```sh
 npx --yes codex-firefox-bridge@latest install
@@ -49,7 +49,7 @@ The bridge remains installed after `npx` exits. Check it at any time with:
 npx --yes codex-firefox-bridge@latest doctor
 ```
 
-Windows and universal Apple Silicon/Intel macOS installers are also attached to every [GitHub release](https://github.com/SunkenInTime/codex-computer-use-firefox-zen/releases/latest).
+Windows and universal Apple Silicon/Intel macOS installers are attached to every [GitHub release](https://github.com/SunkenInTime/codex-computer-use-firefox-zen/releases/latest), along with the Linux x64 binary used by the npm installer.
 
 ### 3. Open the sidebar
 
@@ -131,7 +131,7 @@ The OpenAI native extension host must already be installed by ChatGPT/Codex tool
    .\scripts\register-native-host.ps1
    ```
 
-   macOS:
+   macOS and Linux:
 
    ```sh
    ./scripts/register-native-host.sh
@@ -164,7 +164,7 @@ npm run package
 
 `npm test` checks synchronized release versions, the manifest and compatibility surface, bridge/extension version reporting, and the native protocol, upload, and WebSocket-relay integrations. Packaging writes the unsigned extension archive, a matching review-source archive, and SHA-256 checksums to `dist/`.
 
-Pushing a semantic-version tag such as `v1.4.7` runs the release workflow. It builds and tests the extension, Windows installer, and universal macOS package; verifies all release versions; publishes npm with provenance; attaches release artifacts; and smoke-tests a clean install of the exact public npm version. Submit the matching signed Firefox add-on to AMO only after that smoke test passes.
+Pushing a semantic-version tag such as `v1.4.7` runs the release workflow. It builds and tests the extension, Windows installer, universal macOS package, and Linux x64 binary; verifies all release versions; publishes npm with provenance; attaches release artifacts; and smoke-tests a clean install of the exact public npm version on macOS and Linux. Submit the matching signed Firefox add-on to AMO only after that smoke test passes.
 
 Prepare a release with:
 

@@ -7,7 +7,9 @@ import {
   expectedChecksum,
   installLocations,
   isInstalledBridgeBinary,
+  manifestPaths,
   nativeManifest,
+  optionalManifestPaths,
   platformAsset
 } from "../lib.mjs";
 
@@ -27,6 +29,18 @@ test("selects release assets for every supported platform", () => {
   assert.equal(
     checksumAsset("1.4.0", "darwin"),
     "codex-firefox-bridge-1.4.0-macos-universal.sha256"
+  );
+  assert.equal(
+    platformAsset("1.4.0", "linux", "x64"),
+    "codex-firefox-bridge-1.4.0-linux-x64"
+  );
+  assert.equal(
+    checksumAsset("1.4.0", "linux"),
+    "codex-firefox-bridge-1.4.0-linux-x64.sha256"
+  );
+  assert.throws(
+    () => platformAsset("1.4.0", "linux", "arm64"),
+    /Unsupported platform: linux\/arm64/u
   );
 });
 
@@ -65,6 +79,35 @@ test("uses per-user installation locations", () => {
     macos.manifest,
     "/Users/test/Library/Application Support/Mozilla/NativeMessagingHosts/com.openai.codexextension.json"
   );
+  assert.deepEqual(manifestPaths(macos), [macos.manifest]);
+  assert.deepEqual(optionalManifestPaths(macos), []);
+  const linux = installLocations("linux", {}, "/home/test");
+  assert.equal(
+    linux.directory,
+    "/home/test/.local/share/Codex Firefox Bridge"
+  );
+  assert.equal(
+    linux.manifest,
+    "/home/test/.mozilla/native-messaging-hosts/com.openai.codexextension.json"
+  );
+  assert.deepEqual(manifestPaths(linux), [
+    "/home/test/.mozilla/native-messaging-hosts/com.openai.codexextension.json"
+  ]);
+  assert.deepEqual(optionalManifestPaths(linux), [
+    "/home/test/.zen/native-messaging-hosts/com.openai.codexextension.json"
+  ]);
+  const linuxXdg = installLocations(
+    "linux",
+    { XDG_DATA_HOME: "/home/test/.data" },
+    "/home/test"
+  );
+  assert.equal(
+    linuxXdg.directory,
+    "/home/test/.data/Codex Firefox Bridge"
+  );
+  assert.deepEqual(optionalManifestPaths(linuxXdg), [
+    "/home/test/.zen/native-messaging-hosts/com.openai.codexextension.json"
+  ]);
 });
 
 test("retries transient release-download failures", async () => {

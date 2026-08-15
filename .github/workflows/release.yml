@@ -159,6 +159,35 @@ jobs:
           name: macos-companion
           path: dist/*
 
+  linux-companion:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: dtolnay/rust-toolchain@stable
+      - run: npm test
+      - run: cargo test --manifest-path native-host/Cargo.toml
+      - run: cargo build --release --locked --manifest-path native-host/Cargo.toml
+      - name: Package Linux binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./version.json').version")"
+          mkdir -p dist
+          cp native-host/target/release/codex-firefox-bridge \
+            "dist/codex-firefox-bridge-${version}-linux-x64"
+          chmod 755 "dist/codex-firefox-bridge-${version}-linux-x64"
+          sha256sum "dist/codex-firefox-bridge-${version}-linux-x64" \
+            > "dist/codex-firefox-bridge-${version}-linux-x64.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-companion
+          path: dist/*
+
   npm-package:
     runs-on: ubuntu-latest
     steps:
@@ -179,7 +208,7 @@ jobs:
 
   publish:
     if: github.ref_type == 'tag'
-    needs: [verify, windows-companion, macos-companion, npm-package]
+    needs: [verify, windows-companion, macos-companion, linux-companion, npm-package]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -224,7 +253,9 @@ jobs:
             "codex-firefox-bridge-${version}-windows-x64-setup.exe" \
             "codex-firefox-bridge-${version}-macos-universal.pkg" \
             "codex-firefox-bridge-${version}-macos-universal" \
-            "codex-firefox-bridge-${version}-macos-universal.sha256"
+            "codex-firefox-bridge-${version}-macos-universal.sha256" \
+            "codex-firefox-bridge-${version}-linux-x64" \
+            "codex-firefox-bridge-${version}-linux-x64.sha256"
           do
             curl --fail --location --silent --show-error --head "${release}/${asset}" >/dev/null
           done
@@ -256,3 +287,46 @@ jobs:
           test -f "$manifest"
           binary="$(node -p "JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8')).path" "$manifest")"
           test "$("$binary" --version)" = "$version"
+
+  linux-release-smoke:
+    if: github.ref_type == 'tag'
+    needs: [publish, publish-npm]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - name: Wait for npm registry propagation
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./version.json').version")"
+          for attempt in {1..12}; do
+            if [ "$(npm view "codex-firefox-bridge@${version}" version 2>/dev/null || true)" = "$version" ]; then
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "codex-firefox-bridge@${version} did not become available" >&2
+          exit 1
+      - name: Install the public Linux companion from scratch
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./version.json').version")"
+          scratch="$(mktemp -d)"
+          mkdir -p "$scratch/home" "$scratch/npm-cache"
+          HOME="$scratch/home" \
+            npm_config_cache="$scratch/npm-cache" \
+            CODEX_FIREFOX_ORIGINAL_HOST="/usr/bin/true" \
+            npx --yes "codex-firefox-bridge@${version}" install
+          firefox_manifest="$scratch/home/.mozilla/native-messaging-hosts/com.openai.codexextension.json"
+          zen_manifest="$scratch/home/.zen/native-messaging-hosts/com.openai.codexextension.json"
+          test -f "$firefox_manifest"
+          test -f "$zen_manifest"
+          binary="$(node -p "JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8')).path" "$firefox_manifest")"
+          test "$("$binary" --version)" = "$version"
+          zen_binary="$(node -p "JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8')).path" "$zen_manifest")"
+          test "$binary" = "$zen_binary"

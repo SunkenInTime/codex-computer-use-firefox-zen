@@ -100,6 +100,11 @@
   border-radius: 16px;
 }
 
+.firefox-companion-setup__developer--recommended {
+  border-color: var(--fcs-border-heavy);
+  background: var(--fcs-surface-secondary);
+}
+
 .firefox-companion-setup__option-label {
   margin: 0 0 2px;
   color: var(--fcs-tertiary);

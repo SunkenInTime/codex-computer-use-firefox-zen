@@ -14,7 +14,9 @@ import {
   expectedChecksum,
   installLocations,
   isInstalledBridgeBinary,
+  manifestPaths,
   nativeManifest,
+  optionalManifestPaths,
   platformAsset,
   readInstalledManifest,
   releaseBase
@@ -27,13 +29,98 @@ const packageJson = JSON.parse(
 const version = packageJson.version;
 const command = process.argv[2] ?? "help";
 
-function writeManifest(manifestPath, binaryPath) {
-  fs.mkdirSync(path.dirname(manifestPath), { recursive: true });
-  fs.writeFileSync(
-    manifestPath,
-    `${JSON.stringify(nativeManifest(binaryPath), null, 2)}\n`,
-    "utf8"
-  );
+function writeManifests(manifestList, binaryPath) {
+  const backups = new Map();
+  const staged = [];
+  const committed = [];
+  const discardBackup = (backup) => {
+    try {
+      if (backup && fs.existsSync(backup)) {
+        fs.rmSync(backup, { force: true });
+      }
+    } catch {
+      // A leftover .bak is harmless; the authoritative manifest wins.
+    }
+  };
+  try {
+    for (const manifestPath of manifestList) {
+      fs.mkdirSync(path.dirname(manifestPath), { recursive: true });
+      backups.set(manifestPath, backupFile(manifestPath));
+      const temporaryPath = `${manifestPath}.${process.pid}.tmp`;
+      fs.writeFileSync(
+        temporaryPath,
+        `${JSON.stringify(nativeManifest(binaryPath), null, 2)}\n`,
+        "utf8"
+      );
+      staged.push({ temporaryPath, manifestPath });
+    }
+    for (const { temporaryPath, manifestPath } of staged) {
+      fs.renameSync(temporaryPath, manifestPath);
+      committed.push(manifestPath);
+    }
+  } catch (error) {
+    for (const { temporaryPath } of staged) {
+      if (fs.existsSync(temporaryPath)) {
+        fs.rmSync(temporaryPath, { force: true });
+      }
+    }
+    for (const manifestPath of committed) {
+      restoreBackup(manifestPath, backups.get(manifestPath));
+    }
+    for (const backup of backups.values()) {
+      discardBackup(backup);
+    }
+    throw error;
+  }
+  for (const backup of backups.values()) {
+    discardBackup(backup);
+  }
+}
+
+function writeOptionalManifests(manifestList, binaryPath) {
+  const written = [];
+  for (const manifestPath of manifestList) {
+    const temporaryPath = `${manifestPath}.${process.pid}.tmp`;
+    try {
+      fs.mkdirSync(path.dirname(manifestPath), { recursive: true });
+      fs.writeFileSync(
+        temporaryPath,
+        `${JSON.stringify(nativeManifest(binaryPath), null, 2)}\n`,
+        "utf8"
+      );
+      fs.renameSync(temporaryPath, manifestPath);
+      written.push(manifestPath);
+    } catch (error) {
+      try {
+        if (fs.existsSync(temporaryPath)) {
+          fs.rmSync(temporaryPath, { force: true });
+        }
+      } catch {
+        // Best-effort cleanup of the staged temporary manifest.
+      }
+      console.warn(
+        `codex-firefox-bridge: optional manifest ${manifestPath} unavailable: ${error.message}`
+      );
+    }
+  }
+  return written;
+}
+
+function backupFile(filePath) {
+  if (!fs.existsSync(filePath)) {
+    return null;
+  }
+  const backup = `${filePath}.${process.pid}.bak`;
+  fs.copyFileSync(filePath, backup);
+  return backup;
+}
+
+function restoreBackup(filePath, backup) {
+  if (backup) {
+    fs.renameSync(backup, filePath);
+  } else if (fs.existsSync(filePath)) {
+    fs.rmSync(filePath, { force: true });
+  }
 }
 
 function registerWindows(manifestPath, registryKey) {
@@ -77,28 +164,67 @@ async function install() {
   }
 
   fs.mkdirSync(directory, { recursive: true });
+  for (const manifestPath of manifestPaths(locations)) {
+    fs.mkdirSync(path.dirname(manifestPath), { recursive: true });
+  }
+  const binaryBackup = backupFile(binaryPath);
   const temporaryPath = `${binaryPath}.${process.pid}.tmp`;
   fs.writeFileSync(temporaryPath, binary, { mode: 0o755 });
   fs.renameSync(temporaryPath, binaryPath);
   if (process.platform !== "win32") {
     fs.chmodSync(binaryPath, 0o755);
   }
-  writeManifest(locations.manifest, binaryPath);
+  try {
+    writeManifests(manifestPaths(locations), binaryPath);
+    try {
+      if (binaryBackup) {
+        fs.rmSync(binaryBackup, { force: true });
+      }
+    } catch {
+      // A leftover binary backup is harmless; the new binary is authoritative.
+    }
+  } catch (error) {
+    restoreBackup(binaryPath, binaryBackup);
+    throw error;
+  }
+  const optionalManifests = writeOptionalManifests(
+    optionalManifestPaths(locations),
+    binaryPath
+  );
   if (process.platform === "win32") {
     registerWindows(locations.manifest, locations.registryKey);
   }
 
   console.log(`Installed Codex Firefox Bridge ${version}`);
   console.log(`Binary: ${binaryPath}`);
-  console.log(`Manifest: ${locations.manifest}`);
+  for (const manifestPath of manifestPaths(locations)) {
+    console.log(`Manifest: ${manifestPath}`);
+  }
+  for (const manifestPath of optionalManifests) {
+    console.log(`Manifest (optional): ${manifestPath}`);
+  }
   doctor();
 }
 
 function doctor() {
   const locations = installLocations();
-  const manifest = readInstalledManifest(locations.manifest);
+  const registered = [];
+  for (const manifestPath of manifestPaths(locations)) {
+    if (!fs.existsSync(manifestPath)) {
+      throw new Error(`Native-host manifest is missing: ${manifestPath}`);
+    }
+    registered.push(readInstalledManifest(manifestPath));
+  }
+  const manifest = registered[0];
   if (!fs.existsSync(manifest.path)) {
     throw new Error(`Registered bridge binary is missing: ${manifest.path}`);
+  }
+  for (const extra of registered.slice(1)) {
+    if (extra.path !== manifest.path) {
+      throw new Error(
+        `Native-host manifests point at different binaries: ${manifest.path} vs ${extra.path}`
+      );
+    }
   }
   if (process.platform === "win32") {
     const registration = execFileSync(
@@ -172,6 +298,32 @@ function stopWindowsBridgeProcesses(directory) {
 function uninstall() {
   const locations = installLocations();
   const directory = assertSafeInstallDirectory(locations.directory);
+  const removableManifests = [];
+  for (const manifestPath of manifestPaths(locations)) {
+    if (!fs.existsSync(manifestPath)) {
+      continue;
+    }
+    try {
+      readInstalledManifest(manifestPath);
+    } catch (error) {
+      throw new Error(
+        `Refusing to remove an unfamiliar native-host manifest: ${error.message}`
+      );
+    }
+    removableManifests.push(manifestPath);
+  }
+  for (const manifestPath of optionalManifestPaths(locations)) {
+    if (!fs.existsSync(manifestPath)) {
+      continue;
+    }
+    try {
+      readInstalledManifest(manifestPath);
+      removableManifests.push(manifestPath);
+    } catch {
+      // An optional manifest that is missing or does not belong to this bridge
+      // is left in place rather than blocking removal of the installation.
+    }
+  }
   if (process.platform === "win32") {
     try {
       execFileSync("reg", ["delete", locations.registryKey, "/f"], {
@@ -181,15 +333,8 @@ function uninstall() {
       // The registration may already be absent.
     }
   }
-  if (fs.existsSync(locations.manifest)) {
-    try {
-      readInstalledManifest(locations.manifest);
-      fs.rmSync(locations.manifest, { force: true });
-    } catch (error) {
-      throw new Error(
-        `Refusing to remove an unfamiliar native-host manifest: ${error.message}`
-      );
-    }
+  for (const manifestPath of removableManifests) {
+    fs.rmSync(manifestPath, { force: true });
   }
   if (process.platform === "win32") {
     stopWindowsBridgeProcesses(directory);

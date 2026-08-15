@@ -5,34 +5,43 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-if (process.platform !== "win32") {
-  console.log("Native-host adapter test skipped: Windows is required.");
-  process.exit(0);
-}
-
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), "chatgpt-firefox-native-test-"));
-const csc = path.join(process.env.WINDIR, "Microsoft.NET", "Framework64", "v4.0.30319", "csc.exe");
-const fixture = path.join(temp, "fixture.exe");
 const upload = path.join(temp, "firefox-upload.txt");
+const isWindows = process.platform === "win32";
 const cargoCandidates = [
   process.env.CARGO,
-  path.join(os.homedir(), ".cargo", "bin", "cargo.exe"),
+  path.join(os.homedir(), ".cargo", "bin", isWindows ? "cargo.exe" : "cargo"),
   "cargo"
 ].filter(Boolean);
 
+function createFixture() {
+  if (isWindows) {
+    const csc = path.join(process.env.WINDIR, "Microsoft.NET", "Framework64", "v4.0.30319", "csc.exe");
+    const fixture = path.join(temp, "fixture.exe");
+    const compilation = spawnSync(csc, [
+      "/nologo",
+      "/target:exe",
+      "/optimize+",
+      `/out:${fixture}`,
+      path.join(root, "tests", "NativeHostFixture.cs")
+    ], { encoding: "utf8" });
+    assert.equal(compilation.status, 0, compilation.stderr || compilation.stdout);
+    return fixture;
+  }
+
+  const fixture = path.join(temp, "fixture");
+  fs.writeFileSync(
+    fixture,
+    `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(path.join(root, "tests", "native-host-fixture.mjs"))} "$@"\n`,
+    { mode: 0o755 }
+  );
+  return fixture;
+}
+
 try {
   fs.writeFileSync(upload, "Firefox file upload parity\n", "utf8");
-
-  for (const [output, source, references] of [
-    [fixture, path.join(root, "tests", "NativeHostFixture.cs"), []]
-  ]) {
-    const args = ["/nologo", "/target:exe", "/optimize+", `/out:${output}`];
-    for (const reference of references) args.push(`/reference:${reference}`);
-    args.push(source);
-    const compilation = spawnSync(csc, args, { encoding: "utf8" });
-    assert.equal(compilation.status, 0, compilation.stderr || compilation.stdout);
-  }
+  const fixture = createFixture();
 
   const cargo = cargoCandidates.find((candidate) => {
     const result = spawnSync(candidate, ["--version"], { encoding: "utf8" });
@@ -46,7 +55,13 @@ try {
     path.join(root, "native-host", "Cargo.toml")
   ], { encoding: "utf8", cwd: root });
   assert.equal(build.status, 0, build.stderr || build.stdout);
-  const proxy = path.join(root, "native-host", "target", "debug", "codex-firefox-bridge.exe");
+  const proxy = path.join(
+    root,
+    "native-host",
+    "target",
+    "debug",
+    isWindows ? "codex-firefox-bridge.exe" : "codex-firefox-bridge"
+  );
 
   const run = spawnSync(proxy, [], {
     encoding: null,

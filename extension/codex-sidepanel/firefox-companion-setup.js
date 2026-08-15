@@ -22,6 +22,7 @@ export function getFirefoxCompanionSetupDetails(version) {
     doctorCommand: `npx --yes codex-firefox-bridge@${version} doctor`,
     macosUrl: `${releaseBase}/codex-firefox-bridge-${version}-macos-universal.pkg`,
     windowsUrl: `${releaseBase}/codex-firefox-bridge-${version}-windows-x64-setup.exe`,
+    linuxUrl: `${releaseBase}/codex-firefox-bridge-${version}-linux-x64`,
   };
 }
 
@@ -190,11 +191,17 @@ export function renderFirefoxCompanionSetup({
     label: "Install for macOS",
     platform: "mac",
   });
+  appendDownload(document, downloads, {
+    description: "Raw x64 binary · not an installer",
+    href: details.linuxUrl,
+    label: "Download Linux binary",
+    platform: "linux",
+  });
 
   const developer = appendElement(document, panel, "section", "firefox-companion-setup__developer");
-  appendElement(document, developer, "p", "firefox-companion-setup__option-label", "Developer path");
+  const developerLabel = appendElement(document, developer, "p", "firefox-companion-setup__option-label", "Developer path");
   appendElement(document, developer, "h2", "", "Install with npm");
-  appendElement(
+  const developerCopy = appendElement(
     document,
     developer,
     "p",
@@ -244,7 +251,21 @@ export function renderFirefoxCompanionSetup({
   guide.target = "_blank";
   guide.rel = "noopener noreferrer";
 
-  extension.runtime.getPlatformInfo().then(({ os }) => {
+  extension.runtime.getPlatformInfo().then(({ os, arch }) => {
+    if (os === "linux" && arch === "x86-64") {
+      developerLabel.textContent = "Recommended on Linux";
+      developerCopy.textContent =
+        "This downloads, installs, and registers the Linux bridge for Firefox and Zen.";
+      developer.classList.add("firefox-companion-setup__developer--recommended");
+      developer.setAttribute("aria-label", "Install with npm — recommended for this device");
+      return;
+    }
+    if (os === "linux") {
+      developerLabel.textContent = "Unsupported Linux architecture";
+      developerCopy.textContent =
+        "The Firefox companion currently ships a Linux x64 bridge only. This device is not x86-64, so the npm installer cannot register a matching binary.";
+      return;
+    }
     const recommended = os === "win" ? windows : os === "mac" ? macos : null;
     if (recommended != null) {
       recommended.classList.add("firefox-companion-setup__download--recommended");

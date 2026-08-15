@@ -66,6 +66,10 @@ const setupHtml = read("extension/companion-required.html");
 assert(setupHtml.includes("codex-firefox-bridge@"), "The npm installation path is missing from setup.");
 assert(setupHtml.includes("https://addons.mozilla.org/firefox/addon/codex-computer-use-for-zen/"), "The signed Firefox extension update path is missing from setup.");
 assert(setupHtml.includes('id="version-status"'), "The setup page cannot show installed version details.");
+assert(setupHtml.includes('id="linux-download"'), "The setup page is missing the Linux companion download.");
+assert(setupHtml.includes("Download Linux binary"), "The setup page must not present the Linux binary as an installer.");
+assert(setupHtml.includes('id="developer-install-label"'), "The setup page cannot mark npm as the recommended Linux path.");
+assert(setupHtml.includes('aria-labelledby="developer-install-label developer-install-title"'), "The npm setup section must include its path label in the accessible name.");
 assert(setupHtml.includes("Why is this needed?"), "The setup page must explain why the companion is required.");
 assert(setupHtml.includes("Plugins → Chrome"), "The setup page must explain how to register the OpenAI native host.");
 assert(setupHtml.includes("doctor-command"), "The setup page must include bridge diagnostics.");
@@ -88,6 +92,9 @@ const sidebarSetupSource = read("extension/codex-sidepanel/firefox-companion-set
 assert(sidebarSetupSource.includes("Native transport disconnected"), "Sidebar setup must recognize a disconnected native transport.");
 assert(sidebarSetupSource.includes("Install for Windows"), "Sidebar setup is missing the Windows installer.");
 assert(sidebarSetupSource.includes("Install for macOS"), "Sidebar setup is missing the macOS installer.");
+assert(sidebarSetupSource.includes("Download Linux binary"), "Sidebar setup is missing the Linux binary download.");
+assert(sidebarSetupSource.includes("Recommended on Linux"), "Sidebar setup must recommend the npm installer on Linux.");
+assert(sidebarSetupSource.includes('arch === "x86-64"'), "Sidebar setup must not recommend npm on unsupported Linux architectures.");
 assert(sidebarSetupSource.includes("Plugins → Chrome"), "Sidebar setup must explain the required OpenAI native-host registration.");
 const coreCdpMethods = [
   "DOM.describeNode",
@@ -156,6 +163,7 @@ const nativeHostSource = read("native-host/src/main.rs");
 assert(nativeHostSource.includes("hehggadaopoacecdllhhajmbjkdcmajg"), "The native adapter is not pinned to the official OpenAI extension origin.");
 assert(nativeHostSource.includes("DOM.setFileInputFiles"), "The native adapter does not bridge local file uploads.");
 assert(nativeHostSource.includes("target_os = \"macos\""), "The native adapter does not include macOS host discovery.");
+assert(nativeHostSource.includes("/usr/lib/chatgpt/resources"), "The native adapter does not include Linux ChatGPT host discovery.");
 
 const editingAssetsSource = read("extension/editing-assets.js");
 new vm.Script(editingAssetsSource, { filename: "editing-assets.js" });
