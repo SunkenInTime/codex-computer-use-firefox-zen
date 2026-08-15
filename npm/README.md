@@ -15,7 +15,7 @@ directory, registers it with Firefox and Zen Browser, and runs a diagnostic. The
 On Linux the binary is installed under `$XDG_DATA_HOME/Codex Firefox Bridge`
 (default `~/.local/share/Codex Firefox Bridge`). The required native-host manifest
 is written to `~/.mozilla/native-messaging-hosts/`, which both unconfined Firefox
-and Zen Browser reads. A second manifest is written to
+and Zen Browser read. A second manifest is written to
 `~/.zen/native-messaging-hosts/` on a best-effort basis when that path is
 writable; current Zen Linux builds read the Mozilla registration, so the `.zen`
 copy is optional and never fails installation or diagnostics.

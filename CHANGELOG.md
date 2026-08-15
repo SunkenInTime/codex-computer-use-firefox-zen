@@ -20,7 +20,8 @@ Git tag.
   package. The `~/.mozilla` manifest is the required registration for unconfined
   Firefox and Zen; the `~/.zen` copy is written best-effort and never blocks
   installation or diagnostics. A failed install restores the prior Firefox
-  manifest and bridge binary instead of erasing them.
+  registration — manifest and bridge binary — and removes the orphaned new
+  binary, instead of erasing the working registration.
 
 ## 1.4.7 - 2026-08-12
 
