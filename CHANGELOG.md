@@ -4,7 +4,7 @@ This project follows semantic versioning. The Firefox add-on and native companio
 always share one version and are released from a matching `vMAJOR.MINOR.PATCH`
 Git tag.
 
-## Unreleased
+## 1.4.10 - 2026-08-15
 
 - Completed the strict-CSP Browser Use path for `playwright.domSnapshot()`,
   `dom_cua.get_visible_dom()`, DOM-CUA node targeting, and the virtual-clipboard
