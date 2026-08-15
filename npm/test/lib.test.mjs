@@ -9,6 +9,7 @@ import {
   isInstalledBridgeBinary,
   manifestPaths,
   nativeManifest,
+  optionalManifestPaths,
   platformAsset
 } from "../lib.mjs";
 
@@ -79,6 +80,7 @@ test("uses per-user installation locations", () => {
     "/Users/test/Library/Application Support/Mozilla/NativeMessagingHosts/com.openai.codexextension.json"
   );
   assert.deepEqual(manifestPaths(macos), [macos.manifest]);
+  assert.deepEqual(optionalManifestPaths(macos), []);
   const linux = installLocations("linux", {}, "/home/test");
   assert.equal(
     linux.directory,
@@ -89,7 +91,9 @@ test("uses per-user installation locations", () => {
     "/home/test/.mozilla/native-messaging-hosts/com.openai.codexextension.json"
   );
   assert.deepEqual(manifestPaths(linux), [
-    "/home/test/.mozilla/native-messaging-hosts/com.openai.codexextension.json",
+    "/home/test/.mozilla/native-messaging-hosts/com.openai.codexextension.json"
+  ]);
+  assert.deepEqual(optionalManifestPaths(linux), [
     "/home/test/.zen/native-messaging-hosts/com.openai.codexextension.json"
   ]);
   const linuxXdg = installLocations(
@@ -101,6 +105,9 @@ test("uses per-user installation locations", () => {
     linuxXdg.directory,
     "/home/test/.data/Codex Firefox Bridge"
   );
+  assert.deepEqual(optionalManifestPaths(linuxXdg), [
+    "/home/test/.zen/native-messaging-hosts/com.openai.codexextension.json"
+  ]);
 });
 
 test("retries transient release-download failures", async () => {

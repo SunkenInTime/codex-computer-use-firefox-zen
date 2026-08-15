@@ -39,7 +39,9 @@ if [ "$uname_s" = "Darwin" ]; then
   write_manifest "$HOME/Library/Application Support/Mozilla/NativeMessagingHosts"
 else
   write_manifest "$HOME/.mozilla/native-messaging-hosts"
-  write_manifest "$HOME/.zen/native-messaging-hosts"
+  write_manifest "$HOME/.zen/native-messaging-hosts" || \
+    printf 'codex-firefox-bridge: skipping optional Zen manifest (%s)\n' \
+      "$HOME/.zen/native-messaging-hosts" >&2
 fi
 
 printf 'Installed Codex Firefox Bridge %s for %s\n' "$version" "$USER"

@@ -16,6 +16,7 @@ import {
   isInstalledBridgeBinary,
   manifestPaths,
   nativeManifest,
+  optionalManifestPaths,
   platformAsset,
   readInstalledManifest,
   releaseBase
@@ -29,11 +30,22 @@ const version = packageJson.version;
 const command = process.argv[2] ?? "help";
 
 function writeManifests(manifestList, binaryPath) {
+  const backups = new Map();
   const staged = [];
   const committed = [];
+  const discardBackup = (backup) => {
+    try {
+      if (backup && fs.existsSync(backup)) {
+        fs.rmSync(backup, { force: true });
+      }
+    } catch {
+      // A leftover .bak is harmless; the authoritative manifest wins.
+    }
+  };
   try {
     for (const manifestPath of manifestList) {
       fs.mkdirSync(path.dirname(manifestPath), { recursive: true });
+      backups.set(manifestPath, backupFile(manifestPath));
       const temporaryPath = `${manifestPath}.${process.pid}.tmp`;
       fs.writeFileSync(
         temporaryPath,
@@ -48,12 +60,66 @@ function writeManifests(manifestList, binaryPath) {
     }
   } catch (error) {
     for (const { temporaryPath } of staged) {
-      fs.rmSync(temporaryPath, { force: true });
+      if (fs.existsSync(temporaryPath)) {
+        fs.rmSync(temporaryPath, { force: true });
+      }
     }
     for (const manifestPath of committed) {
-      fs.rmSync(manifestPath, { force: true });
+      restoreBackup(manifestPath, backups.get(manifestPath));
+    }
+    for (const backup of backups.values()) {
+      discardBackup(backup);
     }
     throw error;
+  }
+  for (const backup of backups.values()) {
+    discardBackup(backup);
+  }
+}
+
+function writeOptionalManifests(manifestList, binaryPath) {
+  const written = [];
+  for (const manifestPath of manifestList) {
+    const temporaryPath = `${manifestPath}.${process.pid}.tmp`;
+    try {
+      fs.mkdirSync(path.dirname(manifestPath), { recursive: true });
+      fs.writeFileSync(
+        temporaryPath,
+        `${JSON.stringify(nativeManifest(binaryPath), null, 2)}\n`,
+        "utf8"
+      );
+      fs.renameSync(temporaryPath, manifestPath);
+      written.push(manifestPath);
+    } catch (error) {
+      try {
+        if (fs.existsSync(temporaryPath)) {
+          fs.rmSync(temporaryPath, { force: true });
+        }
+      } catch {
+        // Best-effort cleanup of the staged temporary manifest.
+      }
+      console.warn(
+        `codex-firefox-bridge: optional manifest ${manifestPath} unavailable: ${error.message}`
+      );
+    }
+  }
+  return written;
+}
+
+function backupFile(filePath) {
+  if (!fs.existsSync(filePath)) {
+    return null;
+  }
+  const backup = `${filePath}.${process.pid}.bak`;
+  fs.copyFileSync(filePath, backup);
+  return backup;
+}
+
+function restoreBackup(filePath, backup) {
+  if (backup) {
+    fs.renameSync(backup, filePath);
+  } else if (fs.existsSync(filePath)) {
+    fs.rmSync(filePath, { force: true });
   }
 }
 
@@ -101,13 +167,30 @@ async function install() {
   for (const manifestPath of manifestPaths(locations)) {
     fs.mkdirSync(path.dirname(manifestPath), { recursive: true });
   }
+  const binaryBackup = backupFile(binaryPath);
   const temporaryPath = `${binaryPath}.${process.pid}.tmp`;
   fs.writeFileSync(temporaryPath, binary, { mode: 0o755 });
   fs.renameSync(temporaryPath, binaryPath);
   if (process.platform !== "win32") {
     fs.chmodSync(binaryPath, 0o755);
   }
-  writeManifests(manifestPaths(locations), binaryPath);
+  try {
+    writeManifests(manifestPaths(locations), binaryPath);
+    try {
+      if (binaryBackup) {
+        fs.rmSync(binaryBackup, { force: true });
+      }
+    } catch {
+      // A leftover binary backup is harmless; the new binary is authoritative.
+    }
+  } catch (error) {
+    restoreBackup(binaryPath, binaryBackup);
+    throw error;
+  }
+  const optionalManifests = writeOptionalManifests(
+    optionalManifestPaths(locations),
+    binaryPath
+  );
   if (process.platform === "win32") {
     registerWindows(locations.manifest, locations.registryKey);
   }
@@ -116,6 +199,9 @@ async function install() {
   console.log(`Binary: ${binaryPath}`);
   for (const manifestPath of manifestPaths(locations)) {
     console.log(`Manifest: ${manifestPath}`);
+  }
+  for (const manifestPath of optionalManifests) {
+    console.log(`Manifest (optional): ${manifestPath}`);
   }
   doctor();
 }
@@ -225,6 +311,18 @@ function uninstall() {
       );
     }
     removableManifests.push(manifestPath);
+  }
+  for (const manifestPath of optionalManifestPaths(locations)) {
+    if (!fs.existsSync(manifestPath)) {
+      continue;
+    }
+    try {
+      readInstalledManifest(manifestPath);
+      removableManifests.push(manifestPath);
+    } catch {
+      // An optional manifest that is missing or does not belong to this bridge
+      // is left in place rather than blocking removal of the installation.
+    }
   }
   if (process.platform === "win32") {
     try {

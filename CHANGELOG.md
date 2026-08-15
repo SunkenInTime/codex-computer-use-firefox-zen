@@ -17,8 +17,10 @@ Git tag.
 - Added Linux x64 native-bridge packaging, Firefox/Zen native-host registration,
   ChatGPT host discovery, and native-protocol coverage. Linux setup recommends
   the npm installer on x86-64 because the release asset is a raw binary, not a
-  package, and install rolls back Firefox/Zen manifests if registration cannot
-  complete.
+  package. The `~/.mozilla` manifest is the required registration for unconfined
+  Firefox and Zen; the `~/.zen` copy is written best-effort and never blocks
+  installation or diagnostics. A failed install restores the prior Firefox
+  manifest and bridge binary instead of erasing them.
 
 ## 1.4.7 - 2026-08-12
 

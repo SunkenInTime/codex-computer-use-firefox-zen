@@ -135,13 +135,13 @@ export function installLocations(
     const dataHome =
       environment.XDG_DATA_HOME || platformPath.join(home, ".local", "share");
     const directory = platformPath.join(dataHome, "Codex Firefox Bridge");
-    const manifests = [
-      platformPath.join(
-        home,
-        ".mozilla",
-        "native-messaging-hosts",
-        `${HOST_NAME}.json`
-      ),
+    const manifest = platformPath.join(
+      home,
+      ".mozilla",
+      "native-messaging-hosts",
+      `${HOST_NAME}.json`
+    );
+    const optionalManifests = [
       platformPath.join(
         home,
         ".zen",
@@ -151,8 +151,9 @@ export function installLocations(
     ];
     return {
       directory,
-      manifest: manifests[0],
-      manifests
+      manifest,
+      manifests: [manifest],
+      optionalManifests
     };
   }
   throw new Error(`Unsupported platform: ${platform}`);
@@ -160,6 +161,10 @@ export function installLocations(
 
 export function manifestPaths(locations) {
   return locations.manifests ?? [locations.manifest];
+}
+
+export function optionalManifestPaths(locations) {
+  return locations.optionalManifests ?? [];
 }
 
 export function nativeManifest(binaryPath) {
