@@ -93,15 +93,71 @@ class StrictCspInputElement extends StrictCspHtmlElement {
   }
 }
 class StrictCspTextAreaElement extends StrictCspInputElement {}
+class StrictCspSelectElement extends StrictCspHtmlElement {
+  constructor() {
+    super();
+    this.disabled = false;
+    this.localName = "select";
+    this.nodeName = "SELECT";
+    this.options = ["Alpha", "Beta", "Gamma"].map((value) => ({ disabled: false, label: value, value }));
+    this.selectedIndex = 0;
+    this.tagName = "SELECT";
+  }
+  get value() { return this.options[this.selectedIndex]?.value ?? ""; }
+}
+class StrictCspScrollElement extends StrictCspHtmlElement {
+  constructor() {
+    super();
+    this.clientHeight = 144;
+    this.clientWidth = 722;
+    this.parentElement = null;
+    this.scrollHeight = 484;
+    this.scrollLeft = 0;
+    this.scrollTop = 0;
+    this.scrollWidth = 722;
+    this.tagName = "DIV";
+  }
+  scrollBy({ left = 0, top = 0 }) {
+    this.scrollLeft = Math.max(0, Math.min(this.scrollWidth - this.clientWidth, this.scrollLeft + left));
+    this.scrollTop = Math.max(0, Math.min(this.scrollHeight - this.clientHeight, this.scrollTop + top));
+  }
+}
+class StrictCspButtonElement extends StrictCspHtmlElement {
+  constructor() {
+    super();
+    this.clickCount = 0;
+    this.tagName = "BUTTON";
+  }
+  click() { this.clickCount += 1; }
+}
 class StrictCspFrameElement extends StrictCspHtmlElement {}
 const strictCspInput = new StrictCspInputElement();
+const controlledUploadInput = new StrictCspInputElement();
+controlledUploadInput.type = "file";
+controlledUploadInput.attributeValues.set("aria-label", "Controlled upload");
+const strictCspSelect = new StrictCspSelectElement();
+const strictCspScroll = new StrictCspScrollElement();
+const strictCspShadowButton = new StrictCspButtonElement();
+const strictCspShadowHost = new StrictCspHtmlElement();
+strictCspShadowHost.shadowRoot = { elementFromPoint: () => strictCspShadowButton };
+let strictCspHitTarget = strictCspInput;
+const strictCspPageScrolls = [];
 const strictCspDocument = {
   activeElement: strictCspInput,
   body: strictCspInput,
+  childNodes: [strictCspInput, controlledUploadInput],
   documentElement: strictCspInput,
-  elementFromPoint: () => strictCspInput,
+  elementFromPoint: () => strictCspHitTarget,
   hasFocus: () => true,
-  querySelectorAll: () => [],
+  querySelector(selector) {
+    return selector === 'input[type="file"]' ? controlledUploadInput : null;
+  },
+  querySelectorAll(selector) {
+    if (selector === 'input[type="file"]' || selector === "input,textarea,select,button,[aria-label]") {
+      return [controlledUploadInput];
+    }
+    return [];
+  },
 };
 const strictCspPage = {
   document: strictCspDocument,
@@ -109,26 +165,39 @@ const strictCspPage = {
   Element: StrictCspElement,
   HTMLElement: StrictCspHtmlElement,
   HTMLInputElement: StrictCspInputElement,
+  HTMLSelectElement: StrictCspSelectElement,
   HTMLTextAreaElement: StrictCspTextAreaElement,
   HTMLIFrameElement: StrictCspFrameElement,
   HTMLFrameElement: StrictCspFrameElement,
   InputEvent: StrictCspEvent,
+  Event: StrictCspEvent,
   KeyboardEvent: StrictCspEvent,
   MouseEvent: StrictCspEvent,
   PointerEvent: StrictCspEvent,
   WheelEvent: StrictCspEvent,
   ClipboardEvent: undefined,
   DataTransfer: undefined,
-  getComputedStyle: () => ({ display: "block", opacity: "1", pointerEvents: "auto", visibility: "visible" }),
+  getComputedStyle: (element) => ({
+    display: "block",
+    opacity: "1",
+    overflow: element === strictCspScroll ? "auto" : "visible",
+    overflowX: element === strictCspScroll ? "auto" : "visible",
+    overflowY: element === strictCspScroll ? "auto" : "visible",
+    pointerEvents: "auto",
+    visibility: "visible",
+  }),
   innerHeight: 800,
   innerWidth: 1200,
   Map,
   Set,
   WeakMap,
+  dispatchEvent: () => true,
+  scrollBy: (details) => strictCspPageScrolls.push(details),
 };
 strictCspPage.window = strictCspPage;
 strictCspDocument.defaultView = strictCspPage;
 strictCspInput.ownerDocument = strictCspDocument;
+controlledUploadInput.ownerDocument = strictCspDocument;
 const strictCspPageContext = vm.createContext(strictCspPage, {
   codeGeneration: { strings: false, wasm: false },
 });
@@ -213,7 +282,7 @@ const browser = {
             ? { focused: true, meaningful: true, frameOwner: false }
             : { focused: false, meaningful: false, frameOwner: false };
         } else if ([
-          "dispatchKeyboard", "dispatchMouse", "playwrightDomSnapshot", "visibleDomPoint", "visibleDomSnapshot",
+          "dispatchKeyboard", "dispatchMouse", "installPlaywrightHelper", "synthesizeScroll", "playwrightDomSnapshot", "visibleDomPoint", "visibleDomSnapshot",
           "virtualClipboard", "virtualClipboardCommitCut",
         ].includes(args[0])) {
           value = executeInStrictCspPage(func, args);
@@ -221,6 +290,54 @@ const browser = {
           value = { node: { nodeId: 3, backendNodeId: 3, nodeType: 1, nodeName: "IFRAME", localName: "iframe", nodeValue: "", childNodeCount: 0, attributes: ["src", "https://child.test/"], __frameOwnerIndex: 0, __sameUrlOwnerIndex: 0, __resolvedFrameUrl: "https://child.test/" } };
         } else if (args[0] === "describeNode" && args[1].nodeId === 4) {
           value = { node: { nodeId: 4, backendNodeId: 4, nodeType: 1, nodeName: "DIV", localName: "div", nodeValue: "", childNodeCount: 0, attributes: [] } };
+        } else if (args[0] === "getDocument") {
+          value = {
+            root: {
+              nodeId: 1,
+              backendNodeId: 1,
+              nodeType: 9,
+              nodeName: "#document",
+              localName: "",
+              nodeValue: "",
+              childNodeCount: 1,
+              attributes: [],
+              children: [{
+                nodeId: 2,
+                backendNodeId: 2,
+                nodeType: 1,
+                nodeName: "INPUT",
+                localName: "input",
+                nodeValue: "",
+                childNodeCount: 0,
+                attributes: ["type", "file", "aria-label", "Controlled upload"],
+              }],
+            },
+          };
+        } else if (args[0] === "querySelector" && args[1].selector === 'input[type="file"]') {
+          value = { nodeId: 2 };
+        } else if (args[0] === "describeNode" && args[1].nodeId === 2) {
+          value = {
+            node: {
+              nodeId: 2,
+              backendNodeId: 2,
+              nodeType: 1,
+              nodeName: "INPUT",
+              localName: "input",
+              nodeValue: "",
+              childNodeCount: 0,
+              attributes: ["type", "file", "aria-label", "Controlled upload"],
+            },
+          };
+        } else if (args[0] === "resolveNode" && args[1].nodeId === 2) {
+          value = {
+            object: {
+              type: "object",
+              subtype: "node",
+              className: "HTMLInputElement",
+              description: "input",
+              objectId: "firefox-object-2",
+            },
+          };
         }
         return [{ frameId: target.frameIds?.[0] ?? 0, result: value }];
       }
@@ -522,10 +639,40 @@ assert.equal(cspSafeOperations.at(-1).target.frameIds[0], 7, "Strict-CSP typing 
 
 await compat.debugger.sendCommand({ tabId: 1 }, "Input.dispatchKeyEvent", { type: "char", key: "!", text: "!" });
 assert.equal(strictCspInput.value, `${typedText}!`, "Input.dispatchKeyEvent type=char must insert its text.");
+strictCspDocument.activeElement = strictCspSelect;
+await compat.debugger.sendCommand({ tabId: 1 }, "Input.dispatchKeyEvent", { type: "keyDown", key: "ArrowDown", code: "ArrowDown" });
+await compat.debugger.sendCommand({ tabId: 1 }, "Input.dispatchKeyEvent", { type: "keyDown", key: "ArrowDown", code: "ArrowDown" });
+assert.equal(strictCspSelect.value, "Gamma", "ArrowDown must change the focused Firefox select option.");
+assert.deepEqual(
+  strictCspSelect.events.filter(({ type }) => type === "input" || type === "change").map(({ type }) => type),
+  ["input", "change", "input", "change"],
+  "Keyboard selection must notify page code through input and change events.",
+);
+strictCspDocument.activeElement = strictCspInput;
+strictCspHitTarget = strictCspScroll;
+await compat.debugger.sendCommand({ tabId: 1 }, "Input.dispatchMouseEvent", { type: "mouseWheel", x: 20, y: 30, deltaX: 0, deltaY: 420 });
+assert.equal(strictCspScroll.scrollTop, 340, "A wheel over a scrollable element must move that element to its scroll boundary.");
+assert.equal(strictCspPageScrolls.length, 0, "Nested scrolling must not move the page when the inner element can consume the wheel delta.");
+strictCspScroll.scrollTop = 0;
+strictCspPageScrolls.length = 0;
+await compat.debugger.sendCommand({ tabId: 1 }, "Input.synthesizeScrollGesture", { x: 20, y: 30, xDistance: 0, yDistance: -420 });
+assert.equal(strictCspScroll.scrollTop, 340, "A synthesized gesture over a scrollable element must move that element to its scroll boundary.");
+assert.equal(strictCspPageScrolls.length, 0, "A nested synthesized gesture must not move the page when the inner element can consume it.");
+strictCspHitTarget = strictCspShadowHost;
+await compat.debugger.sendCommand({ tabId: 1 }, "Input.dispatchMouseEvent", { type: "mousePressed", button: "left", x: 20, y: 30 });
+await compat.debugger.sendCommand({ tabId: 1 }, "Input.dispatchMouseEvent", { type: "mouseReleased", button: "left", x: 20, y: 30 });
+assert.equal(strictCspShadowButton.clickCount, 1, "A pointer click must activate the deepest element inside an open shadow root.");
+strictCspHitTarget = strictCspInput;
 await compat.debugger.sendCommand({ tabId: 1 }, "Input.dispatchMouseEvent", { type: "mouseMoved", x: 10, y: 20 });
 const strictMouseMove = strictCspInput.events.filter(({ type }) => type === "mousemove").at(-1);
 assert.equal(strictMouseMove.buttons, 0, "A plain mouse move must not imply that the left button is pressed.");
 
+const untrustedPlaywrightHelper = {
+  __codexFirefoxPlaywrightHelperBrand: "codex-firefox-playwright-helper-v1",
+  parseSelector() { throw new Error("Page-controlled helper must never be trusted."); },
+  querySelectorAll() { return [strictCspInput]; },
+};
+strictCspPage.__codexPlaywrightInjected = untrustedPlaywrightHelper;
 const playwrightInstall = await compat.debugger.sendCommand({ tabId: 1 }, "Runtime.evaluate", {
   expression: `(() => {
     if (!window.__codexPlaywrightInjected) {
@@ -536,6 +683,66 @@ const playwrightInstall = await compat.debugger.sendCommand({ tabId: 1 }, "Runti
   returnByValue: false,
 });
 assert.equal(playwrightInstall.result.type, "undefined", "The optional Playwright helper install must not use eval under strict CSP.");
+const trustedPlaywrightHelper = strictCspPage.__codexPlaywrightInjected;
+assert.notStrictEqual(trustedPlaywrightHelper, untrustedPlaywrightHelper, "The bridge must replace an untrusted truthy page-defined Playwright helper global.");
+assert.equal(
+  trustedPlaywrightHelper.__codexFirefoxPlaywrightHelperBrand,
+  "codex-firefox-playwright-helper-v1",
+  "The installed Firefox Playwright helper must expose its stable identifier.",
+);
+const cssMatches = trustedPlaywrightHelper.querySelectorAll(
+  trustedPlaywrightHelper.parseSelector('input[type="file"]'),
+  strictCspDocument,
+);
+assert.equal(cssMatches.length, 1, "The branded helper must support its advertised CSS selector subset.");
+assert.strictEqual(cssMatches[0], controlledUploadInput);
+const labelMatches = trustedPlaywrightHelper.querySelectorAll(
+  trustedPlaywrightHelper.parseSelector('internal:label="Controlled upload"i'),
+  strictCspDocument,
+);
+assert.equal(labelMatches.length, 1, "The branded helper must support its advertised internal:label selector subset.");
+assert.strictEqual(labelMatches[0], controlledUploadInput);
+await compat.debugger.sendCommand({ tabId: 1 }, "Runtime.evaluate", {
+  expression: `(() => {
+    if (!window.__codexPlaywrightInjected) {
+      window.__codexPlaywrightInjected = new PlaywrightInjected.InjectedScript(window, {});
+    }
+  })()`,
+  awaitPromise: true,
+  returnByValue: false,
+});
+const reinstalledPlaywrightHelper = strictCspPage.__codexPlaywrightInjected;
+assert.notStrictEqual(
+  reinstalledPlaywrightHelper,
+  trustedPlaywrightHelper,
+  "Each install must replace the page global with a fresh valid helper because the public brand is forgeable in the MAIN world.",
+);
+const reinstalledCssMatches = reinstalledPlaywrightHelper.querySelectorAll(
+  reinstalledPlaywrightHelper.parseSelector('input[type="file"]'),
+  strictCspDocument,
+);
+assert.equal(reinstalledCssMatches.length, 1, "A reinstalled helper must retain the advertised CSS selector subset.");
+assert.strictEqual(reinstalledCssMatches[0], controlledUploadInput);
+const reinstalledLabelMatches = reinstalledPlaywrightHelper.querySelectorAll(
+  reinstalledPlaywrightHelper.parseSelector('internal:label="Controlled upload"i'),
+  strictCspDocument,
+);
+assert.equal(reinstalledLabelMatches.length, 1, "A reinstalled helper must retain the advertised internal:label selector subset.");
+assert.strictEqual(reinstalledLabelMatches[0], controlledUploadInput);
+
+// This covers direct debugger DOM-domain resolution only. It does not exercise
+// the installed client's live Playwright locator pipeline.
+const locatorDocument = await compat.debugger.sendCommand({ tabId: 1 }, "DOM.getDocument", { depth: 2 });
+assert.equal(locatorDocument.root.nodeId, 1, "Direct DOM.getDocument must expose a top-level document root.");
+const locatorMatch = await compat.debugger.sendCommand({ tabId: 1 }, "DOM.querySelector", {
+  nodeId: locatorDocument.root.nodeId,
+  selector: 'input[type="file"]',
+});
+assert.notEqual(locatorMatch.nodeId, 0, "Direct DOM.querySelector must resolve the controlled file input.");
+const locatorNode = await compat.debugger.sendCommand({ tabId: 1 }, "DOM.describeNode", { nodeId: locatorMatch.nodeId });
+assert.deepEqual(locatorNode.node.attributes, ["type", "file", "aria-label", "Controlled upload"]);
+const locatorObject = await compat.debugger.sendCommand({ tabId: 1 }, "DOM.resolveNode", { nodeId: locatorMatch.nodeId });
+assert.equal(locatorObject.object.subtype, "node", "The directly resolved DOM node must remain usable through the runtime object bridge.");
 
 const playwrightSnapshot = await compat.debugger.sendCommand({ tabId: 1 }, "Runtime.evaluate", {
   expression: `(() => {

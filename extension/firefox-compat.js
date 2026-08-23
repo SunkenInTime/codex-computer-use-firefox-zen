@@ -650,8 +650,198 @@
       return objectId ? state.objects.get(objectId) : state.nodes.get(id);
     };
     const editableTarget = (target) => target?.closest?.('input,textarea,select,button,a[href],[contenteditable="true"],[tabindex]') ?? target;
+    const deepestElementFromPoint = (x, y) => {
+      let target = document.elementFromPoint(x, y) ?? document.body ?? document.documentElement;
+      while (target?.shadowRoot?.elementFromPoint != null) {
+        const inner = target.shadowRoot.elementFromPoint(x, y);
+        if (inner == null || inner === target) break;
+        target = inner;
+      }
+      return target;
+    };
+    const scrollAtPoint = (x, y, deltaX, deltaY) => {
+      const hitTarget = deepestElementFromPoint(x, y);
+      let scrollTarget = hitTarget instanceof Element ? hitTarget : hitTarget?.parentElement;
+      while (scrollTarget instanceof Element) {
+        const style = getComputedStyle(scrollTarget);
+        const scrollableX = /^(auto|scroll|overlay)$/.test(style.overflowX || style.overflow)
+          && scrollTarget.scrollWidth > scrollTarget.clientWidth;
+        const scrollableY = /^(auto|scroll|overlay)$/.test(style.overflowY || style.overflow)
+          && scrollTarget.scrollHeight > scrollTarget.clientHeight;
+        const canConsumeX = scrollableX && (deltaX < 0 ? scrollTarget.scrollLeft > 0 : deltaX > 0 && scrollTarget.scrollLeft < scrollTarget.scrollWidth - scrollTarget.clientWidth);
+        const canConsumeY = scrollableY && (deltaY < 0 ? scrollTarget.scrollTop > 0 : deltaY > 0 && scrollTarget.scrollTop < scrollTarget.scrollHeight - scrollTarget.clientHeight);
+        if (canConsumeX || canConsumeY) {
+          scrollTarget.scrollBy({ left: canConsumeX ? deltaX : 0, top: canConsumeY ? deltaY : 0, behavior: "instant" });
+          return scrollTarget;
+        }
+        scrollTarget = scrollTarget.parentElement ?? scrollTarget.getRootNode?.()?.host ?? null;
+      }
+      window.scrollBy({ left: deltaX, top: deltaY, behavior: "instant" });
+      return window;
+    };
+
+    const serializeDomNode = (node, currentDepth, maxDepth, frameOwners) => {
+      const id = nodeId(node);
+      const serialized = {
+        nodeId: id,
+        backendNodeId: id,
+        nodeType: node.nodeType,
+        nodeName: node.nodeName,
+        localName: node.localName ?? "",
+        nodeValue: node.nodeValue ?? "",
+        childNodeCount: node.childNodes?.length ?? 0,
+        attributes: node.nodeType === Node.ELEMENT_NODE
+          ? [...node.attributes].flatMap((attribute) => [attribute.name, attribute.value])
+          : [],
+      };
+      if (currentDepth < maxDepth || maxDepth < 0) {
+        serialized.children = [...(node.childNodes ?? [])]
+          .map((child) => serializeDomNode(child, currentDepth + 1, maxDepth, frameOwners));
+      }
+      if (node === document) {
+        serialized.documentURL = location.href;
+        serialized.baseURL = document.baseURI;
+      }
+      if (node instanceof HTMLIFrameElement || node instanceof HTMLFrameElement) {
+        const ownerIndex = frameOwners.indexOf(node);
+        const source = node.hasAttribute("srcdoc") ? "about:srcdoc" : (node.getAttribute("src") || "about:blank");
+        let resolvedFrameUrl = "";
+        try { resolvedFrameUrl = new URL(source, document.baseURI).href; } catch {}
+        serialized.__frameOwnerIndex = ownerIndex;
+        serialized.__sameUrlOwnerIndex = frameOwners.slice(0, ownerIndex).filter((element) => {
+          const candidate = element.hasAttribute("srcdoc") ? "about:srcdoc" : (element.getAttribute("src") || "about:blank");
+          try { return new URL(candidate, document.baseURI).href === resolvedFrameUrl; } catch { return false; }
+        }).length;
+        serialized.__resolvedFrameUrl = resolvedFrameUrl;
+      }
+      return serialized;
+    };
+
+    const remoteNode = (node, objectGroup = null) => {
+      if (!(node instanceof Node)) throw new Error("DOM node not found");
+      const objectId = `firefox-object-${state.nextObjectId++}`;
+      state.objects.set(objectId, node);
+      if (objectGroup) state.objectGroups.set(objectId, objectGroup);
+      return {
+        type: "object",
+        subtype: "node",
+        className: node.constructor?.name ?? "Node",
+        description: node.localName || node.nodeName || "Node",
+        objectId,
+      };
+    };
 
     switch (operation) {
+      case "installPlaywrightHelper": {
+        const helperBrand = "codex-firefox-playwright-helper-v1";
+        class FirefoxPlaywrightInjected {
+          constructor(targetWindow) {
+            this.window = targetWindow;
+            Object.defineProperty(this, "__codexFirefoxPlaywrightHelperBrand", {
+              value: helperBrand,
+              enumerable: true,
+            });
+          }
+          parseSelector(selector) {
+            const parts = String(selector).split(" >> ").map((source) => {
+              const engine = /^([a-z][\w-]*(?::[\w-]+)?)=([\s\S]*)$/iu.exec(source);
+              if (engine == null) return { name: "css", body: source, source };
+              return { name: engine[1], body: engine[2], source };
+            });
+            return { parts };
+          }
+          querySelectorAll(parsedSelector, root) {
+            let matches = [root];
+            const deepQuery = (scope, selector) => {
+              const found = [...(scope.querySelectorAll?.(selector) ?? [])];
+              for (const element of [...(scope.querySelectorAll?.("*") ?? [])]) {
+                if (element.shadowRoot) found.push(...deepQuery(element.shadowRoot, selector));
+              }
+              return found;
+            };
+            const textBody = (body) => {
+              const withoutCaseFlag = String(body).replace(/[is]$/u, "");
+              try { return JSON.parse(withoutCaseFlag); } catch { return withoutCaseFlag; }
+            };
+            for (const part of parsedSelector.parts ?? []) {
+              if (part.name === "nth") {
+                let index = Number(part.body);
+                if (index === -1) index = matches.length - 1;
+                matches = matches.slice(index, index + 1);
+                continue;
+              }
+              const next = [];
+              for (const scope of matches) {
+                if (part.name === "css") {
+                  next.push(...deepQuery(scope, part.body));
+                } else if (part.name === "internal:label") {
+                  const expected = String(textBody(part.body)).toLocaleLowerCase();
+                  next.push(...deepQuery(scope, "input,textarea,select,button,[aria-label]").filter((element) => {
+                    const labels = [
+                      element.getAttribute?.("aria-label"),
+                      element.labels?.[0]?.textContent,
+                      element.getAttribute?.("placeholder"),
+                    ].filter(Boolean).map((value) => String(value).trim().toLocaleLowerCase());
+                    return labels.includes(expected);
+                  }));
+                } else if (part.name === "internal:control" && part.body === "enter-frame") {
+                  continue;
+                } else {
+                  throw new Error(`Unsupported Firefox Playwright selector engine: ${part.name}`);
+                }
+              }
+              matches = next;
+            }
+            return matches.filter((element, index, values) => values.indexOf(element) === index);
+          }
+          checkDeprecatedSelectorUsage() {}
+          strictModeViolationError(_selector, matches) {
+            return new Error(`strict mode violation: selector resolved to ${matches.length} elements`);
+          }
+          elementState(element, stateName) {
+            if (!element?.isConnected && element?.ownerDocument !== document) {
+              return { matches: false, received: "error:notconnected" };
+            }
+            if (stateName === "visible" || stateName === "hidden") {
+              const style = getComputedStyle(element);
+              const rect = element.getBoundingClientRect?.();
+              const visible = style.display !== "none" && style.visibility !== "hidden"
+                && Number(style.opacity ?? 1) !== 0 && (rect == null || rect.width > 0 || rect.height > 0);
+              return { matches: stateName === "visible" ? visible : !visible, received: visible ? "visible" : "hidden" };
+            }
+            if (stateName === "enabled" || stateName === "disabled") {
+              const disabled = element.matches?.(":disabled") === true || element.disabled === true;
+              return { matches: stateName === "disabled" ? disabled : !disabled, received: disabled ? "disabled" : "enabled" };
+            }
+            if (stateName === "editable") {
+              const editable = !element.readOnly && !element.disabled
+                && (element.matches?.("input,textarea,select,[contenteditable=true]") === true);
+              return { matches: editable, received: editable ? "editable" : "noteditable" };
+            }
+            if (stateName === "checked") {
+              return { matches: element.checked === true, received: element.checked === true ? "checked" : "unchecked" };
+            }
+            return { matches: true, received: stateName };
+          }
+        }
+        globalThis.__codexPlaywrightInjected = new FirefoxPlaywrightInjected(globalThis);
+        return {};
+      }
+      case "getDocument": {
+        const depth = Number.isInteger(payload.depth) ? payload.depth : 2;
+        const frameOwners = [...document.querySelectorAll("iframe,frame")];
+        return { root: serializeDomNode(document, 0, depth, frameOwners) };
+      }
+      case "querySelector": {
+        const root = state.nodes.get(payload.nodeId) ?? document;
+        return { nodeId: nodeId(root.querySelector?.(payload.selector) ?? null) };
+      }
+      case "querySelectorAll": {
+        const root = state.nodes.get(payload.nodeId) ?? document;
+        return { nodeIds: [...(root.querySelectorAll?.(payload.selector) ?? [])].map(nodeId) };
+      }
+      case "resolveNode":
+        return { object: remoteNode(nodeFromPayload(), payload.objectGroup) };
       case "accessibilityTree": {
         const root = payload.rootBackendNodeId == null
           ? document.documentElement
@@ -809,7 +999,7 @@
         const y = Number(event.y ?? state.pointer.y);
         state.pointer.x = x;
         state.pointer.y = y;
-        const target = document.elementFromPoint(x, y) ?? document.body ?? document.documentElement;
+        const target = deepestElementFromPoint(x, y);
         const interactive = editableTarget(target);
         const fileInput = interactive instanceof HTMLInputElement && interactive.type === "file" ? interactive : null;
         state.pointer.element = target;
@@ -818,8 +1008,10 @@
         const buttons = Number(event.buttons ?? (event.type === "mousePressed" ? 1 << button : 0));
         const common = { bubbles: true, cancelable: true, composed: true, clientX: x, clientY: y, screenX: x, screenY: y, button, buttons, detail: event.clickCount ?? 1 };
         if (event.type === "mouseWheel") {
-          target.dispatchEvent(new WheelEvent("wheel", { ...common, deltaX: event.deltaX ?? 0, deltaY: event.deltaY ?? 0, deltaMode: WheelEvent.DOM_DELTA_PIXEL }));
-          window.scrollBy({ left: event.deltaX ?? 0, top: event.deltaY ?? 0, behavior: "instant" });
+          const deltaX = Number(event.deltaX ?? 0);
+          const deltaY = Number(event.deltaY ?? 0);
+          target.dispatchEvent(new WheelEvent("wheel", { ...common, deltaX, deltaY, deltaMode: WheelEvent.DOM_DELTA_PIXEL }));
+          scrollAtPoint(x, y, deltaX, deltaY);
         } else if (event.type === "mouseMoved") {
           target.dispatchEvent(new PointerEvent("pointermove", { ...common, pointerId: 1, pointerType: "mouse", isPrimary: true }));
           target.dispatchEvent(new MouseEvent("mousemove", common));
@@ -866,9 +1058,10 @@
             if ((event.clickCount ?? 1) >= 2) interactive.dispatchEvent(new MouseEvent("dblclick", common));
           }
         }
-        return event.type === "mouseReleased" && fileInput
+        const result = event.type === "mouseReleased" && fileInput
           ? { fileChooser: { backendNodeId: nodeId(fileInput), mode: fileInput.multiple ? "selectMultiple" : "selectSingle" } }
           : {};
+        return result;
       }
       case "dispatchKeyboard": {
         const event = payload.event ?? {};
@@ -901,6 +1094,17 @@
             const to = start === end ? Math.min(target.value.length, end + 1) : end;
             target.setRangeText("", start, to, "start");
             target.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "deleteContentForward" }));
+          } else if (target instanceof HTMLSelectElement && (key === "ArrowDown" || key === "ArrowUp")) {
+            const direction = key === "ArrowDown" ? 1 : -1;
+            let nextIndex = target.selectedIndex;
+            do {
+              nextIndex += direction;
+            } while (nextIndex >= 0 && nextIndex < target.options.length && target.options[nextIndex].disabled);
+            if (nextIndex >= 0 && nextIndex < target.options.length && nextIndex !== target.selectedIndex) {
+              target.selectedIndex = nextIndex;
+              target.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+              target.dispatchEvent(new Event("change", { bubbles: true }));
+            }
           } else if (key === "Enter") {
             if (target instanceof HTMLTextAreaElement) {
               const start = target.selectionStart ?? target.value.length;
@@ -1297,10 +1501,13 @@
         }
         return {};
       }
-      case "synthesizeScroll":
-        window.scrollBy({ left: -(Number(payload.xDistance) || 0), top: -(Number(payload.yDistance) || 0), behavior: "instant" });
-        window.dispatchEvent(new Event("scroll", { bubbles: true }));
+      case "synthesizeScroll": {
+        const x = Number(payload.x ?? state.pointer.x);
+        const y = Number(payload.y ?? state.pointer.y);
+        const scrolled = scrollAtPoint(x, y, -(Number(payload.xDistance) || 0), -(Number(payload.yDistance) || 0));
+        if (scrolled === window) window.dispatchEvent(new Event("scroll", { bubbles: true }));
         return {};
+      }
       default:
         throw new Error(`Unsupported CSP-safe Firefox page operation: ${operation}`);
     }
@@ -1677,7 +1884,6 @@
     const returnByValue = params.returnByValue === true;
     const awaitPromise = params.awaitPromise === true;
     const objectGroup = typeof params.objectGroup === "string" ? params.objectGroup : null;
-
     const browserUseBindingName = browserUseBindingNameFromExpression(expression);
     if (browserUseBindingName != null) {
       const installed = bindingNamesByTab.get(tabId)?.has(browserUseBindingName) === true;
@@ -1721,10 +1927,12 @@
       expression.includes("new PlaywrightInjected.InjectedScript")
       && expression.includes("__codexPlaywrightInjected")
     ) {
-      // The strict-CSP snapshot path below does not need Playwright's dynamically
-      // generated helper bundle, but the Browser Use client expects its one-time
-      // installation call to succeed before issuing the snapshot request.
+      await executeCspSafePageOperation(tabId, "installPlaywrightHelper", {}, { frameId });
       return { result: byValueRemote(undefined) };
+    }
+
+    if (expression.includes("__codexPlaywrightInjected")) {
+      await executeCspSafePageOperation(tabId, "installPlaywrightHelper", {}, { frameId });
     }
 
     if (expression.includes("incrementalAriaSnapshot") && expression.includes("iframeRefs")) {
@@ -2332,52 +2540,7 @@
 
   async function getDocument(tabId, params, frameId = 0) {
     const depth = Number.isInteger(params.depth) ? params.depth : 2;
-    const result = await executeUserScript(
-      tabId,
-      operationScript(`
-        const __maxDepth = ${JSON.stringify(depth)};
-        const __frameOwners = [...document.querySelectorAll("iframe,frame")];
-        const __ownerUrl = (element) => {
-          try {
-            const source = element.hasAttribute("srcdoc") ? "about:srcdoc" : (element.getAttribute("src") || "about:blank");
-            return new URL(source, document.baseURI).href;
-          } catch { return ""; }
-        };
-        const __serialize = (node, currentDepth) => {
-          const nodeId = __nodeId(node);
-          const attributes = node.nodeType === Node.ELEMENT_NODE
-            ? [...node.attributes].flatMap((attribute) => [attribute.name, attribute.value])
-            : [];
-          const serialized = {
-            nodeId,
-            backendNodeId: nodeId,
-            nodeType: node.nodeType,
-            nodeName: node.nodeName,
-            localName: node.localName ?? "",
-            nodeValue: node.nodeValue ?? "",
-            childNodeCount: node.childNodes?.length ?? 0,
-            attributes,
-          };
-          if (currentDepth < __maxDepth || __maxDepth < 0) {
-            serialized.children = [...(node.childNodes ?? [])].map((child) => __serialize(child, currentDepth + 1));
-          }
-          if (node === document) {
-            serialized.documentURL = location.href;
-            serialized.baseURL = document.baseURI;
-          }
-          if (node instanceof HTMLIFrameElement || node instanceof HTMLFrameElement) {
-            const ownerIndex = __frameOwners.indexOf(node);
-            const ownerUrl = __ownerUrl(node);
-            serialized.__frameOwnerIndex = ownerIndex;
-            serialized.__sameUrlOwnerIndex = __frameOwners.slice(0, ownerIndex).filter((element) => __ownerUrl(element) === ownerUrl).length;
-            serialized.__resolvedFrameUrl = ownerUrl;
-          }
-          return serialized;
-        };
-        return { root: __serialize(document, 0) };
-      `),
-      { frameId },
-    );
+    const result = await executeCspSafePageOperation(tabId, "getDocument", { depth }, { frameId });
     const frames = await firefox.webNavigation.getAllFrames({ tabId }).catch(() => []);
     const visit = (node) => {
       if (node == null) return;
@@ -2396,15 +2559,7 @@
   }
 
   async function querySelector(tabId, params, frameId = 0) {
-    return executeUserScript(
-      tabId,
-      operationScript(`
-        const root = __state.nodes.get(${JSON.stringify(params.nodeId)}) ?? document;
-        const node = root.querySelector?.(${JSON.stringify(params.selector)}) ?? null;
-        return { nodeId: __nodeId(node) };
-      `),
-      { frameId },
-    );
+    return executeCspSafePageOperation(tabId, "querySelector", params, { frameId });
   }
 
   function setFrameOwnerFrameId(tabId, parentFrameId, node, frames) {
@@ -2443,16 +2598,7 @@
   }
 
   async function resolveNode(tabId, params, frameId = 0) {
-    return executeUserScript(
-      tabId,
-      operationScript(`
-        const id = ${JSON.stringify(params.nodeId ?? params.backendNodeId ?? 0)};
-        const node = __state.nodes.get(id);
-        if (!(node instanceof Node)) throw new Error("DOM node not found");
-        return { object: __remote(node, false, ${JSON.stringify(params.objectGroup ?? null)}) };
-      `),
-      { frameId },
-    );
+    return executeCspSafePageOperation(tabId, "resolveNode", params, { frameId });
   }
 
   async function requestNode(tabId, params, frameId = 0) {
@@ -3489,7 +3635,7 @@
       case "DOM.querySelector":
         return querySelector(tabId, params, frameId);
       case "DOM.querySelectorAll":
-        return executeUserScript(tabId, operationScript(`const root=__state.nodes.get(${JSON.stringify(params.nodeId)})??document; return {nodeIds:[...(root.querySelectorAll?.(${JSON.stringify(params.selector)})??[])].map(__nodeId)};`), { frameId });
+        return executeCspSafePageOperation(tabId, "querySelectorAll", params, { frameId });
       case "DOM.getAttributes":
         return executeUserScript(tabId, operationScript(`const node=__state.nodes.get(${JSON.stringify(params.nodeId)}); return {attributes:node instanceof Element?[...node.attributes].flatMap(attribute=>[attribute.name,attribute.value]):[]};`), { frameId });
       case "DOM.setAttributeValue":
