@@ -7,8 +7,8 @@ use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{ChildStderr, ChildStdin, ChildStdout, Command, Stdio};
-use std::sync::atomic::{AtomicU16, Ordering};
-use std::sync::{Arc, OnceLock};
+use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
+use std::sync::{mpsc, Arc, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tempfile::TempDir;
@@ -17,7 +17,8 @@ const HOST_NAME: &str = "com.openai.codexextension";
 const OFFICIAL_CHROME_ORIGIN: &str = "chrome-extension://hehggadaopoacecdllhhajmbjkdcmajg/";
 const OFFICIAL_CHROME_EXTENSION_ID: &str = "hehggadaopoacecdllhhajmbjkdcmajg";
 const FIREFOX_EXTENSION_ID: &str = "codex-computer-use-firefox-zen@sunkenintime";
-const MAX_NATIVE_MESSAGE_BYTES: usize = 1024 * 1024 * 1024;
+const MAX_NATIVE_INPUT_MESSAGE_BYTES: usize = 1024 * 1024 * 1024;
+const MAX_NATIVE_OUTPUT_MESSAGE_BYTES: usize = 1024 * 1024;
 const CODEX_VERSION_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Debug, PartialEq)]
@@ -26,6 +27,12 @@ struct AppServerRuntime {
     node: PathBuf,
     browser_client: PathBuf,
     node_repl: PathBuf,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+enum NativeOutputOutcome {
+    CleanEof,
+    Fatal(Option<String>),
 }
 
 fn main() {
@@ -92,15 +99,66 @@ fn run() -> Result<i32, Box<dyn std::error::Error>> {
         .ok_or("original host stderr is unavailable")?;
 
     let input_thread = thread::spawn(move || forward_stdin(child_stdin));
-    let output_thread =
-        thread::spawn(move || forward_native_messages(child_stdout, relay_port, upstream_port));
-    let error_thread = thread::spawn(move || forward_stderr(child_stderr));
+    let fatal_output = Arc::new(AtomicBool::new(false));
+    let (output_outcome_tx, output_outcome_rx) = mpsc::channel();
+    let output_fatal_state = Arc::clone(&fatal_output);
+    let output_thread = thread::spawn(move || {
+        let outcome =
+            forward_native_messages(child_stdout, relay_port, upstream_port, output_fatal_state);
+        let _ = output_outcome_tx.send(outcome.clone());
+        outcome
+    });
+    let error_thread = thread::spawn(move || forward_stderr(child_stderr, fatal_output));
 
-    let status = child.wait()?;
-    let _ = output_thread.join();
-    let _ = error_thread.join();
+    let mut observed_output_outcome = None;
+    let status = loop {
+        if observed_output_outcome.is_none() {
+            match output_outcome_rx.try_recv() {
+                Ok(outcome @ NativeOutputOutcome::Fatal(_)) => {
+                    observed_output_outcome = Some(outcome);
+                    let _ = child.kill();
+                    break child.wait()?;
+                }
+                Ok(NativeOutputOutcome::CleanEof) => {
+                    observed_output_outcome = Some(NativeOutputOutcome::CleanEof);
+                }
+                Err(mpsc::TryRecvError::Empty) => {}
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    observed_output_outcome = Some(NativeOutputOutcome::Fatal(None));
+                    let _ = child.kill();
+                    break child.wait()?;
+                }
+            }
+        }
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        thread::sleep(Duration::from_millis(10));
+    };
+    let joined_output_outcome = output_thread
+        .join()
+        .unwrap_or(NativeOutputOutcome::Fatal(None));
+    let fatal_diagnostic = match observed_output_outcome.as_ref() {
+        Some(NativeOutputOutcome::Fatal(diagnostic)) => diagnostic.clone(),
+        _ => match &joined_output_outcome {
+            NativeOutputOutcome::Fatal(diagnostic) => diagnostic.clone(),
+            NativeOutputOutcome::CleanEof => None,
+        },
+    };
+    let fatal_output_observed =
+        matches!(observed_output_outcome, Some(NativeOutputOutcome::Fatal(_)))
+            || matches!(joined_output_outcome, NativeOutputOutcome::Fatal(_));
+    if !fatal_output_observed {
+        let _ = error_thread.join();
+    }
     drop(input_thread);
     drop(fallback_registry);
+    if fatal_output_observed {
+        if let Some(diagnostic) = fatal_diagnostic {
+            eprintln!("{diagnostic}");
+        }
+        return Ok(1);
+    }
     Ok(status.code().unwrap_or(1))
 }
 
@@ -418,7 +476,7 @@ fn forward_stdin(mut output: ChildStdin) {
             }
         }
         let length = u32::from_le_bytes(header) as usize;
-        if length > MAX_NATIVE_MESSAGE_BYTES {
+        if length > MAX_NATIVE_INPUT_MESSAGE_BYTES {
             eprintln!("[codex-firefox-bridge] native input message is too large: {length}");
             return;
         }
@@ -477,34 +535,74 @@ fn rewrite_firefox_extension_id(value: &mut Value) -> bool {
     changed
 }
 
-fn forward_stderr(mut input: ChildStderr) {
-    let _ = io::copy(&mut input, &mut io::stderr().lock());
+fn forward_stderr(mut input: ChildStderr, fatal_output: Arc<AtomicBool>) {
+    let mut buffer = [0_u8; 8 * 1024];
+    loop {
+        let Ok(read) = input.read(&mut buffer) else {
+            return;
+        };
+        if read == 0 {
+            return;
+        }
+        if fatal_output.load(Ordering::Acquire) {
+            return;
+        }
+        let mut output = io::stderr().lock();
+        if fatal_output.load(Ordering::Acquire) {
+            return;
+        }
+        if output
+            .write_all(&buffer[..read])
+            .and_then(|_| output.flush())
+            .is_err()
+        {
+            return;
+        }
+    }
 }
 
-fn forward_native_messages(mut input: ChildStdout, relay_port: u16, upstream_port: Arc<AtomicU16>) {
+fn forward_native_messages(
+    mut input: ChildStdout,
+    relay_port: u16,
+    upstream_port: Arc<AtomicU16>,
+    fatal_output: Arc<AtomicBool>,
+) -> NativeOutputOutcome {
     let mut output = io::stdout().lock();
     loop {
         let mut header = [0_u8; 4];
         match read_exact_or_eof(&mut input, &mut header) {
-            Ok(false) => return,
+            Ok(false) => return NativeOutputOutcome::CleanEof,
             Ok(true) => {}
             Err(error) => {
-                eprintln!("[codex-firefox-bridge] native header read failed: {error}");
-                return;
+                fatal_output.store(true, Ordering::Release);
+                return NativeOutputOutcome::Fatal(Some(format!(
+                    "[codex-firefox-bridge] native header read failed: {error}"
+                )));
             }
         }
 
         let length = u32::from_le_bytes(header) as usize;
-        if length > MAX_NATIVE_MESSAGE_BYTES {
-            eprintln!("[codex-firefox-bridge] native message is too large: {length}");
-            return;
+        if length > MAX_NATIVE_OUTPUT_MESSAGE_BYTES {
+            fatal_output.store(true, Ordering::Release);
+            return NativeOutputOutcome::Fatal(Some(format!(
+                "[codex-firefox-bridge] native output message is too large: {length}"
+            )));
         }
         let mut payload = vec![0_u8; length];
         if let Err(error) = input.read_exact(&mut payload) {
-            eprintln!("[codex-firefox-bridge] native payload read failed: {error}");
-            return;
+            fatal_output.store(true, Ordering::Release);
+            return NativeOutputOutcome::Fatal(Some(format!(
+                "[codex-firefox-bridge] native payload read failed: {error}"
+            )));
         }
         let enriched = enrich_native_message(payload, relay_port, &upstream_port);
+        if enriched.len() > MAX_NATIVE_OUTPUT_MESSAGE_BYTES {
+            fatal_output.store(true, Ordering::Release);
+            return NativeOutputOutcome::Fatal(Some(format!(
+                "[codex-firefox-bridge] native output message is too large: {}",
+                enriched.len()
+            )));
+        }
         let output_header = (enriched.len() as u32).to_le_bytes();
         if output
             .write_all(&output_header)
@@ -512,7 +610,8 @@ fn forward_native_messages(mut input: ChildStdout, relay_port: u16, upstream_por
             .and_then(|_| output.flush())
             .is_err()
         {
-            return;
+            fatal_output.store(true, Ordering::Release);
+            return NativeOutputOutcome::Fatal(None);
         }
     }
 }
@@ -1039,12 +1138,8 @@ mod tests {
     fn discovers_linux_chatgpt_app_resources() {
         let paths = chatgpt_resource_candidates_for("linux", Some(Path::new("/home/test")));
         assert!(paths.contains(&PathBuf::from("/usr/lib/chatgpt/resources")));
-        assert!(paths.contains(&PathBuf::from(
-            "/home/test/.local/opt/chatgpt/resources"
-        )));
-        assert!(paths.contains(&PathBuf::from(
-            "/home/test/.local/share/chatgpt/resources"
-        )));
+        assert!(paths.contains(&PathBuf::from("/home/test/.local/opt/chatgpt/resources")));
+        assert!(paths.contains(&PathBuf::from("/home/test/.local/share/chatgpt/resources")));
     }
 
     #[test]
