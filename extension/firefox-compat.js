@@ -442,6 +442,7 @@
   const networkConditionsByTab = new Map();
   const userAgentByTab = new Map();
   const bypassCspTabs = new Set();
+  const dynamicEvalBlockedFrames = new Set();
   const emulationStateByTab = new Map();
   const pendingDialogsByFrame = new Map();
   const autoAttachByTab = new Map();
@@ -662,22 +663,31 @@
     const scrollAtPoint = (x, y, deltaX, deltaY) => {
       const hitTarget = deepestElementFromPoint(x, y);
       let scrollTarget = hitTarget instanceof Element ? hitTarget : hitTarget?.parentElement;
+      let remainingX = deltaX;
+      let remainingY = deltaY;
+      let lastScrolled = null;
       while (scrollTarget instanceof Element) {
         const style = getComputedStyle(scrollTarget);
         const scrollableX = /^(auto|scroll|overlay)$/.test(style.overflowX || style.overflow)
           && scrollTarget.scrollWidth > scrollTarget.clientWidth;
         const scrollableY = /^(auto|scroll|overlay)$/.test(style.overflowY || style.overflow)
           && scrollTarget.scrollHeight > scrollTarget.clientHeight;
-        const canConsumeX = scrollableX && (deltaX < 0 ? scrollTarget.scrollLeft > 0 : deltaX > 0 && scrollTarget.scrollLeft < scrollTarget.scrollWidth - scrollTarget.clientWidth);
-        const canConsumeY = scrollableY && (deltaY < 0 ? scrollTarget.scrollTop > 0 : deltaY > 0 && scrollTarget.scrollTop < scrollTarget.scrollHeight - scrollTarget.clientHeight);
+        const canConsumeX = scrollableX && (remainingX < 0 ? scrollTarget.scrollLeft > 0 : remainingX > 0 && scrollTarget.scrollLeft < scrollTarget.scrollWidth - scrollTarget.clientWidth);
+        const canConsumeY = scrollableY && (remainingY < 0 ? scrollTarget.scrollTop > 0 : remainingY > 0 && scrollTarget.scrollTop < scrollTarget.scrollHeight - scrollTarget.clientHeight);
         if (canConsumeX || canConsumeY) {
-          scrollTarget.scrollBy({ left: canConsumeX ? deltaX : 0, top: canConsumeY ? deltaY : 0, behavior: "instant" });
-          return scrollTarget;
+          scrollTarget.scrollBy({ left: canConsumeX ? remainingX : 0, top: canConsumeY ? remainingY : 0, behavior: "instant" });
+          if (canConsumeX) remainingX = 0;
+          if (canConsumeY) remainingY = 0;
+          lastScrolled = scrollTarget;
+          if (remainingX === 0 && remainingY === 0) return lastScrolled;
         }
         scrollTarget = scrollTarget.parentElement ?? scrollTarget.getRootNode?.()?.host ?? null;
       }
-      window.scrollBy({ left: deltaX, top: deltaY, behavior: "instant" });
-      return window;
+      if (remainingX !== 0 || remainingY !== 0) {
+        window.scrollBy({ left: remainingX, top: remainingY, behavior: "instant" });
+        return window;
+      }
+      return lastScrolled;
     };
 
     const serializeDomNode = (node, currentDepth, maxDepth, frameOwners) => {
@@ -760,9 +770,22 @@
               return found;
             };
             const textBody = (body) => {
-              const withoutCaseFlag = String(body).replace(/[is]$/u, "");
-              try { return JSON.parse(withoutCaseFlag); } catch { return withoutCaseFlag; }
+              const source = String(body);
+              const flagged = /^([\s\S]*)([is])$/u.exec(source);
+              let flag = null;
+              let value = source;
+              if (flagged != null) {
+                try {
+                  value = JSON.parse(flagged[1]);
+                  flag = flagged[2];
+                } catch {}
+              }
+              if (flag == null) {
+                try { value = JSON.parse(source); } catch {}
+              }
+              return { value, caseSensitive: flag === "s" };
             };
+            const normalizeText = (value) => String(value).replace(/\s+/gu, " ").trim();
             for (const part of parsedSelector.parts ?? []) {
               if (part.name === "nth") {
                 let index = Number(part.body);
@@ -775,14 +798,17 @@
                 if (part.name === "css") {
                   next.push(...deepQuery(scope, part.body));
                 } else if (part.name === "internal:label") {
-                  const expected = String(textBody(part.body)).toLocaleLowerCase();
+                  const labelMatcher = textBody(part.body);
+                  const expected = normalizeText(labelMatcher.value);
                   next.push(...deepQuery(scope, "input,textarea,select,button,[aria-label]").filter((element) => {
                     const labels = [
                       element.getAttribute?.("aria-label"),
                       element.labels?.[0]?.textContent,
                       element.getAttribute?.("placeholder"),
-                    ].filter(Boolean).map((value) => String(value).trim().toLocaleLowerCase());
-                    return labels.includes(expected);
+                    ].filter(Boolean).map(normalizeText);
+                    return labels.some((label) => labelMatcher.caseSensitive
+                      ? label === expected
+                      : label.toLowerCase().includes(expected.toLowerCase()));
                   }));
                 } else if (part.name === "internal:control" && part.body === "enter-frame") {
                   continue;
@@ -1010,8 +1036,8 @@
         if (event.type === "mouseWheel") {
           const deltaX = Number(event.deltaX ?? 0);
           const deltaY = Number(event.deltaY ?? 0);
-          target.dispatchEvent(new WheelEvent("wheel", { ...common, deltaX, deltaY, deltaMode: WheelEvent.DOM_DELTA_PIXEL }));
-          scrollAtPoint(x, y, deltaX, deltaY);
+          const wheel = new WheelEvent("wheel", { ...common, deltaX, deltaY, deltaMode: WheelEvent.DOM_DELTA_PIXEL });
+          if (target.dispatchEvent(wheel)) scrollAtPoint(x, y, deltaX, deltaY);
         } else if (event.type === "mouseMoved") {
           target.dispatchEvent(new PointerEvent("pointermove", { ...common, pointerId: 1, pointerType: "mouse", isPrimary: true }));
           target.dispatchEvent(new MouseEvent("mousemove", common));
@@ -1094,12 +1120,19 @@
             const to = start === end ? Math.min(target.value.length, end + 1) : end;
             target.setRangeText("", start, to, "start");
             target.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "deleteContentForward" }));
-          } else if (target instanceof HTMLSelectElement && (key === "ArrowDown" || key === "ArrowUp")) {
+          } else if (target instanceof HTMLSelectElement && !target.multiple && (key === "ArrowDown" || key === "ArrowUp")) {
             const direction = key === "ArrowDown" ? 1 : -1;
             let nextIndex = target.selectedIndex;
             do {
               nextIndex += direction;
-            } while (nextIndex >= 0 && nextIndex < target.options.length && target.options[nextIndex].disabled);
+            } while (
+              nextIndex >= 0
+              && nextIndex < target.options.length
+              && (
+                target.options[nextIndex].disabled
+                || (target.options[nextIndex].parentElement?.tagName === "OPTGROUP" && target.options[nextIndex].parentElement.disabled)
+              )
+            );
             if (nextIndex >= 0 && nextIndex < target.options.length && nextIndex !== target.selectedIndex) {
               target.selectedIndex = nextIndex;
               target.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
@@ -1931,13 +1964,17 @@
       return { result: byValueRemote(undefined) };
     }
 
-    if (expression.includes("__codexPlaywrightInjected")) {
-      await executeCspSafePageOperation(tabId, "installPlaywrightHelper", {}, { frameId });
-    }
-
     if (expression.includes("incrementalAriaSnapshot") && expression.includes("iframeRefs")) {
+      await executeCspSafePageOperation(tabId, "installPlaywrightHelper", {}, { frameId });
       const value = await executeCspSafePageOperation(tabId, "playwrightDomSnapshot", {}, { frameId });
       return { result: byValueRemote(value) };
+    }
+
+    const evaluationFrameKey = frameKey(tabId, frameId);
+    if (expression.includes("__codexPlaywrightInjected") && dynamicEvalBlockedFrames.has(evaluationFrameKey)) {
+      throw new Error(
+        "The Firefox bridge cannot execute this Playwright helper expression on a strict-CSP page. Use a supported Browser Use locator or DOM operation instead.",
+      );
     }
 
     if (
@@ -1990,6 +2027,7 @@
       return await executeUserScript(tabId, code, { frameId });
     } catch (error) {
       if (/\beval\b.*(?:content security policy|csp|unsafe-eval)|(?:content security policy|csp|unsafe-eval).*\beval\b/iu.test(error?.message ?? String(error))) {
+        dynamicEvalBlockedFrames.add(evaluationFrameKey);
         throw new Error(
           "The Firefox bridge is connected, but this dynamic Runtime.evaluate script is not supported on a strict-CSP page. Use DOM CUA, CUA, or the built-in DOM snapshot instead.",
         );
@@ -2866,6 +2904,9 @@
   }
 
   async function synthesizeScroll(tabId, params, frameId = 0) {
+    const routed = await routePointToFrame(tabId, frameId, Number(params.x) || 0, Number(params.y) || 0);
+    frameId = routed.frameId;
+    params = { ...params, x: routed.x, y: routed.y };
     return executeCspSafePageOperation(tabId, "synthesizeScroll", params, { frameId });
   }
 
@@ -4036,6 +4077,9 @@
       networkConditionsByTab.delete(tabId);
       userAgentByTab.delete(tabId);
       bypassCspTabs.delete(tabId);
+      for (const key of dynamicEvalBlockedFrames) {
+        if (key.startsWith(`${tabId}:`)) dynamicEvalBlockedFrames.delete(key);
+      }
       for (const [requestId, pending] of pendingInterceptions) {
         if (pending.tabId === tabId) settleInterception(requestId, {});
       }
@@ -4296,6 +4340,9 @@
     networkConditionsByTab.delete(tabId);
     userAgentByTab.delete(tabId);
     bypassCspTabs.delete(tabId);
+    for (const key of dynamicEvalBlockedFrames) {
+      if (key.startsWith(`${tabId}:`)) dynamicEvalBlockedFrames.delete(key);
+    }
     emulationStateByTab.delete(tabId);
     for (const [requestId, pending] of pendingInterceptions) {
       if (pending.tabId === tabId) settleInterception(requestId, {});
@@ -4327,6 +4374,7 @@
   firefox.webNavigation.onCommitted.addListener((details) => {
     const { tabId, frameId } = details;
     if (!debuggerAttachedTabs.has(tabId)) return;
+    dynamicEvalBlockedFrames.delete(frameKey(tabId, frameId));
     const sessionId = frameId === 0 ? null : (sessionIdByFrame.get(frameKey(tabId, frameId)) ?? null);
     emitDebuggerEvent(tabId, "Runtime.executionContextDestroyed", {
       executionContextId: executionContextIdForFrame(frameId),
