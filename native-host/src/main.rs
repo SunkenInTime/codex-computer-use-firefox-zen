@@ -595,7 +595,15 @@ fn forward_native_messages(
                 "[codex-firefox-bridge] native payload read failed: {error}"
             )));
         }
-        let enriched = enrich_native_message(payload, relay_port, &upstream_port);
+        let enriched = match enrich_native_message(payload, relay_port, &upstream_port) {
+            Ok(enriched) => enriched,
+            Err(projected_length) => {
+                fatal_output.store(true, Ordering::Release);
+                return NativeOutputOutcome::Fatal(Some(format!(
+                    "[codex-firefox-bridge] native output message is too large: {projected_length}"
+                )));
+            }
+        };
         if enriched.len() > MAX_NATIVE_OUTPUT_MESSAGE_BYTES {
             fatal_output.store(true, Ordering::Release);
             return NativeOutputOutcome::Fatal(Some(format!(
@@ -634,17 +642,63 @@ fn read_exact_or_eof(reader: &mut impl Read, buffer: &mut [u8]) -> io::Result<bo
     Ok(true)
 }
 
-fn enrich_native_message(payload: Vec<u8>, relay_port: u16, upstream_port: &AtomicU16) -> Vec<u8> {
+fn enrich_native_message(
+    payload: Vec<u8>,
+    relay_port: u16,
+    upstream_port: &AtomicU16,
+) -> Result<Vec<u8>, u128> {
+    enrich_native_message_with_pre_read_hook(payload, relay_port, upstream_port, || {})
+}
+
+fn enrich_native_message_with_pre_read_hook(
+    payload: Vec<u8>,
+    relay_port: u16,
+    upstream_port: &AtomicU16,
+    pre_read_hook: impl FnOnce(),
+) -> Result<Vec<u8>, u128> {
     let Ok(mut value) = serde_json::from_slice::<Value>(&payload) else {
-        return payload;
+        return Ok(payload);
     };
+    let mut pending_files = Vec::new();
     let changed = enrich_bridge_version(&mut value)
-        | enrich_commands(&mut value)
+        | enrich_commands(&mut value, &mut pending_files)
         | rewrite_websocket_urls(&mut value, relay_port, upstream_port);
     if !changed {
-        return payload;
+        return Ok(payload);
     }
-    serde_json::to_vec(&value).unwrap_or(payload)
+
+    let projected_without_file_data =
+        serde_json::to_vec(&value).unwrap_or_else(|_| payload.clone());
+    let projected_length = pending_files.iter().fold(
+        projected_without_file_data.len() as u128,
+        |length, pending| length + base64_encoded_length(pending.byte_len),
+    );
+    if projected_length > MAX_NATIVE_OUTPUT_MESSAGE_BYTES as u128 {
+        return Err(projected_length);
+    }
+
+    pre_read_hook();
+    let mut encoded_files = Vec::with_capacity(pending_files.len());
+    for pending in pending_files {
+        let byte_len = usize::try_from(pending.byte_len)
+            .expect("a preflight-approved file length must fit in usize");
+        let mut data = Vec::with_capacity(byte_len);
+        let read = open_regular_file(&pending.path)
+            .ok_or_else(|| io::Error::other("upload path is not a readable regular file"))
+            .and_then(|file| file.take(pending.byte_len).read_to_end(&mut data));
+        if read.is_err() {
+            encoded_files.push(None);
+            continue;
+        }
+        encoded_files.push(Some(base64::engine::general_purpose::STANDARD.encode(data)));
+    }
+    apply_file_payload_data(&mut value, &mut encoded_files.into_iter());
+
+    let enriched = serde_json::to_vec(&value).unwrap_or(payload);
+    if enriched.len() > MAX_NATIVE_OUTPUT_MESSAGE_BYTES {
+        return Err(enriched.len() as u128);
+    }
+    Ok(enriched)
 }
 
 fn enrich_bridge_version(value: &mut Value) -> bool {
@@ -661,7 +715,16 @@ fn enrich_bridge_version(value: &mut Value) -> bool {
     true
 }
 
-fn enrich_commands(value: &mut Value) -> bool {
+struct PendingFilePayload {
+    path: PathBuf,
+    byte_len: u64,
+}
+
+fn base64_encoded_length(byte_len: u64) -> u128 {
+    u128::from(byte_len).div_ceil(3) * 4
+}
+
+fn enrich_commands(value: &mut Value, pending_files: &mut Vec<PendingFilePayload>) -> bool {
     let mut changed = false;
     match value {
         Value::Object(object) => {
@@ -670,14 +733,23 @@ fn enrich_commands(value: &mut Value) -> bool {
                     let Some(Value::Object(parameters)) = object.get_mut(key) else {
                         continue;
                     };
+                    changed |= parameters.remove("_firefoxFilePayloads").is_some();
+                }
+                for key in ["commandParams", "params"] {
+                    let Some(Value::Object(parameters)) = object.get_mut(key) else {
+                        continue;
+                    };
                     let Some(Value::Array(files)) = parameters.get("files") else {
                         continue;
                     };
-                    let payloads: Vec<Value> = files
-                        .iter()
-                        .filter_map(Value::as_str)
-                        .filter_map(file_payload)
-                        .collect();
+                    let mut payloads = Vec::new();
+                    for path in files.iter().filter_map(Value::as_str) {
+                        let Some((payload, pending)) = pending_file_payload(path) else {
+                            continue;
+                        };
+                        payloads.push(payload);
+                        pending_files.push(pending);
+                    }
                     if !payloads.is_empty() {
                         parameters.insert("_firefoxFilePayloads".into(), Value::Array(payloads));
                         changed = true;
@@ -686,12 +758,12 @@ fn enrich_commands(value: &mut Value) -> bool {
                 }
             }
             for child in object.values_mut() {
-                changed |= enrich_commands(child);
+                changed |= enrich_commands(child, pending_files);
             }
         }
         Value::Array(array) => {
             for child in array {
-                changed |= enrich_commands(child);
+                changed |= enrich_commands(child, pending_files);
             }
         }
         _ => {}
@@ -699,26 +771,85 @@ fn enrich_commands(value: &mut Value) -> bool {
     changed
 }
 
-fn file_payload(path: &str) -> Option<Value> {
-    let path = Path::new(path);
-    let metadata = fs::metadata(path).ok()?;
-    if !metadata.is_file() {
-        return None;
-    }
-    let data = fs::read(path).ok()?;
+fn pending_file_payload(path: &str) -> Option<(Value, PendingFilePayload)> {
+    let source_path = Path::new(path);
+    let path = source_path.canonicalize().ok()?;
+    let file = open_regular_file(&path)?;
+    let metadata = file.metadata().ok()?;
+    let byte_len = metadata.len();
     let modified = metadata
         .modified()
         .ok()
         .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
         .map(|duration| duration.as_millis() as u64)
         .unwrap_or(0);
-    Some(json!({
-        "path": path.canonicalize().unwrap_or_else(|_| path.to_path_buf()).to_string_lossy(),
+    let payload = json!({
+        "path": path.to_string_lossy(),
         "name": path.file_name()?.to_string_lossy(),
         "type": mime_type(path.extension().and_then(|value| value.to_str()).unwrap_or("")),
         "lastModified": modified,
-        "data": base64::engine::general_purpose::STANDARD.encode(data)
-    }))
+        "data": ""
+    });
+    Some((payload, PendingFilePayload { path, byte_len }))
+}
+
+#[cfg(unix)]
+fn open_regular_file(path: &Path) -> Option<fs::File> {
+    use std::os::unix::fs::OpenOptionsExt;
+
+    let file = fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NONBLOCK | libc::O_NOFOLLOW)
+        .open(path)
+        .ok()?;
+    file.metadata().ok()?.is_file().then_some(file)
+}
+
+#[cfg(not(unix))]
+fn open_regular_file(path: &Path) -> Option<fs::File> {
+    let file = fs::File::open(path).ok()?;
+    file.metadata().ok()?.is_file().then_some(file)
+}
+
+fn apply_file_payload_data(
+    value: &mut Value,
+    encoded_files: &mut impl Iterator<Item = Option<String>>,
+) {
+    match value {
+        Value::Object(object) => {
+            if object.get("method").and_then(Value::as_str) == Some("DOM.setFileInputFiles") {
+                for key in ["commandParams", "params"] {
+                    let Some(Value::Object(parameters)) = object.get_mut(key) else {
+                        continue;
+                    };
+                    let Some(Value::Array(payloads)) = parameters.get_mut("_firefoxFilePayloads")
+                    else {
+                        continue;
+                    };
+                    payloads.retain_mut(|payload| {
+                        let Some(encoded) = encoded_files.next().flatten() else {
+                            return false;
+                        };
+                        payload["data"] = Value::String(encoded);
+                        true
+                    });
+                    if payloads.is_empty() {
+                        parameters.remove("_firefoxFilePayloads");
+                    }
+                    break;
+                }
+            }
+            for child in object.values_mut() {
+                apply_file_payload_data(child, encoded_files);
+            }
+        }
+        Value::Array(array) => {
+            for child in array {
+                apply_file_payload_data(child, encoded_files);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn mime_type(extension: &str) -> &'static str {
@@ -1037,6 +1168,387 @@ fn bundled_app_host_candidates_for(
 mod tests {
     use super::*;
 
+    fn file_input_message(paths: &[&Path]) -> Vec<u8> {
+        serde_json::to_vec(&json!({
+            "jsonrpc": "2.0",
+            "id": "file-input",
+            "method": "DOM.setFileInputFiles",
+            "params": {
+                "files": paths
+                    .iter()
+                    .map(|path| path.to_string_lossy().into_owned())
+                    .collect::<Vec<_>>(),
+            }
+        }))
+        .unwrap()
+    }
+
+    fn expected_file_payload(path: &Path) -> Value {
+        let metadata = fs::metadata(path).unwrap();
+        let modified = metadata
+            .modified()
+            .unwrap()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+        json!({
+            "path": path.canonicalize().unwrap().to_string_lossy(),
+            "name": path.file_name().unwrap().to_string_lossy(),
+            "type": "text/plain",
+            "lastModified": modified,
+            "data": base64::engine::general_purpose::STANDARD.encode(fs::read(path).unwrap()),
+        })
+    }
+
+    fn expected_enriched_file_input(paths: &[&Path]) -> Vec<u8> {
+        let mut value: Value = serde_json::from_slice(&file_input_message(paths)).unwrap();
+        value["params"]["_firefoxFilePayloads"] = Value::Array(
+            paths
+                .iter()
+                .map(|path| expected_file_payload(path))
+                .collect(),
+        );
+        serde_json::to_vec(&value).unwrap()
+    }
+
+    #[test]
+    fn rejects_an_oversized_file_upload_with_the_exact_projected_output_length() {
+        let directory = tempfile::tempdir().unwrap();
+        let file = directory.path().join("oversized.txt");
+        fs::write(&file, vec![b'x'; 786_432]).unwrap();
+        let payload = file_input_message(&[&file]);
+        let projected_length = expected_enriched_file_input(&[&file]).len();
+        assert!(projected_length > MAX_NATIVE_OUTPUT_MESSAGE_BYTES);
+
+        let upstream = AtomicU16::new(0);
+        let error = enrich_native_message(payload, 54321, &upstream).expect_err(
+            "an upload that would exceed Firefox's 1 MiB native-message limit must be rejected before its contents are loaded or base64-encoded",
+        );
+
+        assert_eq!(error, projected_length as u128);
+    }
+
+    #[test]
+    fn rejects_file_uploads_when_their_cumulative_payload_exceeds_the_remaining_budget() {
+        let directory = tempfile::tempdir().unwrap();
+        let first = directory.path().join("first.txt");
+        let second = directory.path().join("second.txt");
+        fs::write(&first, vec![b'a'; 524_288]).unwrap();
+        fs::write(&second, vec![b'b'; 524_288]).unwrap();
+        let projected_first_length = expected_enriched_file_input(&[&first]).len();
+        let projected_total_length = expected_enriched_file_input(&[&first, &second]).len();
+        assert!(projected_first_length <= MAX_NATIVE_OUTPUT_MESSAGE_BYTES);
+        assert!(projected_total_length > MAX_NATIVE_OUTPUT_MESSAGE_BYTES);
+
+        let upstream = AtomicU16::new(0);
+        let error = enrich_native_message(file_input_message(&[&first, &second]), 54321, &upstream)
+            .expect_err(
+                "the second file must be checked against the remaining native-message budget",
+            );
+
+        assert_eq!(error, projected_total_length as u128);
+    }
+
+    #[test]
+    fn enriches_a_small_file_upload_with_its_firefox_payload() {
+        let directory = tempfile::tempdir().unwrap();
+        let file = directory.path().join("small.txt");
+        fs::write(&file, b"small Firefox upload").unwrap();
+        let expected: Value =
+            serde_json::from_slice(&expected_enriched_file_input(&[&file])).unwrap();
+
+        let upstream = AtomicU16::new(0);
+        let enriched = enrich_native_message(file_input_message(&[&file]), 54321, &upstream)
+            .expect("a small upload within Firefox's native-message limit must be enriched");
+
+        assert_eq!(
+            serde_json::from_slice::<Value>(&enriched).unwrap(),
+            expected
+        );
+    }
+
+    #[test]
+    fn removes_a_forged_file_payload_before_enriching_a_later_file_command() {
+        let directory = tempfile::tempdir().unwrap();
+        let valid_file = directory.path().join("valid.txt");
+        fs::write(&valid_file, b"valid command data").unwrap();
+
+        let forged_command = json!({
+            "method": "DOM.setFileInputFiles",
+            "params": {
+                "files": [],
+                "_firefoxFilePayloads": [{
+                    "path": "/attacker-controlled.txt",
+                    "name": "attacker-controlled.txt",
+                    "data": "attacker-controlled-data"
+                }]
+            }
+        });
+        let valid_command: Value =
+            serde_json::from_slice(&file_input_message(&[&valid_file])).unwrap();
+        let payload = serde_json::to_vec(&json!({
+            "commands": [forged_command, valid_command]
+        }))
+        .unwrap();
+
+        let upstream = AtomicU16::new(0);
+        let enriched: Value =
+            serde_json::from_slice(&enrich_native_message(payload, 54321, &upstream).unwrap())
+                .unwrap();
+
+        assert!(enriched["commands"][0]["params"]
+            .get("_firefoxFilePayloads")
+            .is_none());
+        assert_eq!(
+            enriched["commands"][1]["params"]["_firefoxFilePayloads"],
+            Value::Array(vec![expected_file_payload(&valid_file)])
+        );
+    }
+
+    #[test]
+    fn associates_each_nested_file_command_with_only_its_own_file_payloads() {
+        let directory = tempfile::tempdir().unwrap();
+        let first = directory.path().join("first.txt");
+        let second = directory.path().join("second.txt");
+        fs::write(&first, b"first command data").unwrap();
+        fs::write(&second, b"second command data").unwrap();
+        let first_command: Value = serde_json::from_slice(&file_input_message(&[&first])).unwrap();
+        let second_command: Value =
+            serde_json::from_slice(&file_input_message(&[&second])).unwrap();
+        let payload = serde_json::to_vec(&json!({
+            "responses": [
+                first_command,
+                { "nested": { "command": second_command } }
+            ]
+        }))
+        .unwrap();
+
+        let upstream = AtomicU16::new(0);
+        let enriched: Value =
+            serde_json::from_slice(&enrich_native_message(payload, 54321, &upstream).unwrap())
+                .unwrap();
+
+        assert_eq!(
+            enriched["responses"][0]["params"]["_firefoxFilePayloads"],
+            Value::Array(vec![expected_file_payload(&first)])
+        );
+        assert_eq!(
+            enriched["responses"][1]["nested"]["command"]["params"]["_firefoxFilePayloads"],
+            Value::Array(vec![expected_file_payload(&second)])
+        );
+    }
+
+    #[test]
+    fn enriches_many_small_file_uploads_without_losing_any_payload() {
+        let directory = tempfile::tempdir().unwrap();
+        let files: Vec<PathBuf> = (0..2048)
+            .map(|index| {
+                let file = directory.path().join(format!("small-{index}.txt"));
+                fs::write(&file, b"x").unwrap();
+                file
+            })
+            .collect();
+        let references: Vec<&Path> = files.iter().map(PathBuf::as_path).collect();
+
+        let upstream = AtomicU16::new(0);
+        let enriched: Value = serde_json::from_slice(
+            &enrich_native_message(file_input_message(&references), 54321, &upstream).unwrap(),
+        )
+        .unwrap();
+
+        let payloads = enriched["params"]["_firefoxFilePayloads"]
+            .as_array()
+            .unwrap();
+        assert_eq!(payloads.len(), files.len());
+        for (payload, file) in payloads.iter().zip(&files) {
+            assert_eq!(payload, &expected_file_payload(file));
+        }
+    }
+
+    #[test]
+    fn reads_only_the_metadata_time_file_length_after_the_pre_read_hook_grows_the_file() {
+        let directory = tempfile::tempdir().unwrap();
+        let file = directory.path().join("snapshot.txt");
+        fs::write(&file, b"metadata-time contents").unwrap();
+        let expected: Value =
+            serde_json::from_slice(&expected_enriched_file_input(&[&file])).unwrap();
+        let hook_runs = std::sync::atomic::AtomicUsize::new(0);
+        let upstream = AtomicU16::new(0);
+
+        let enriched = enrich_native_message_with_pre_read_hook(
+            file_input_message(&[&file]),
+            54321,
+            &upstream,
+            || {
+                hook_runs.fetch_add(1, Ordering::SeqCst);
+                let mut grown = fs::read(&file).unwrap();
+                grown.extend(vec![b'g'; MAX_NATIVE_OUTPUT_MESSAGE_BYTES + 1]);
+                fs::write(&file, grown).unwrap();
+            },
+        )
+        .expect(
+            "a file that grows after metadata capture must not fabricate a 1,048,577-byte overflow",
+        );
+
+        assert_eq!(hook_runs.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            serde_json::from_slice::<Value>(&enriched).unwrap(),
+            expected
+        );
+    }
+
+    #[test]
+    fn preserves_file_payload_named_application_data_outside_file_input_parameters() {
+        let application_payload = json!({
+            "source": "application",
+            "items": [{ "id": "unrelated" }]
+        });
+        let nested_application_payload = json!(["unrelated", { "keep": true }]);
+        let payload = serde_json::to_vec(&json!({
+            "applicationState": {
+                "_firefoxFilePayloads": application_payload,
+                "nested": {
+                    "_firefoxFilePayloads": nested_application_payload
+                }
+            },
+            "command": {
+                "method": "DOM.setFileInputFiles",
+                "params": {
+                    "files": [],
+                    "_firefoxFilePayloads": [{ "forged": true }],
+                    "applicationData": {
+                        "_firefoxFilePayloads": { "keep": "this value" }
+                    }
+                }
+            }
+        }))
+        .unwrap();
+
+        let upstream = AtomicU16::new(0);
+        let enriched: Value =
+            serde_json::from_slice(&enrich_native_message(payload, 54321, &upstream).unwrap())
+                .unwrap();
+
+        assert_eq!(
+            enriched["applicationState"]["_firefoxFilePayloads"],
+            application_payload
+        );
+        assert_eq!(
+            enriched["applicationState"]["nested"]["_firefoxFilePayloads"],
+            nested_application_payload
+        );
+        assert_eq!(
+            enriched["command"]["params"]["applicationData"]["_firefoxFilePayloads"],
+            json!({ "keep": "this value" })
+        );
+        assert!(enriched["command"]["params"]
+            .get("_firefoxFilePayloads")
+            .is_none());
+    }
+
+    #[cfg(unix)]
+    fn create_fifo(path: &Path) {
+        let status = Command::new("mkfifo").arg(path).status().unwrap();
+        assert!(status.success(), "mkfifo failed for {}", path.display());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn skips_a_fifo_upload_without_blocking_enrichment() {
+        let directory = tempfile::tempdir().unwrap();
+        let fifo = directory.path().join("upload.fifo");
+        create_fifo(&fifo);
+        let payload = file_input_message(&[&fifo]);
+        let (result_tx, result_rx) = mpsc::channel();
+        let worker = thread::spawn(move || {
+            let upstream = AtomicU16::new(0);
+            result_tx
+                .send(enrich_native_message(payload, 54321, &upstream))
+                .unwrap();
+        });
+
+        let first_result = result_rx.recv_timeout(Duration::from_millis(250));
+        let timed_out = matches!(first_result, Err(mpsc::RecvTimeoutError::Timeout));
+        if timed_out {
+            let writer = fs::OpenOptions::new().write(true).open(&fifo).unwrap();
+            drop(writer);
+        }
+        let result = match first_result {
+            Ok(result) => result,
+            Err(mpsc::RecvTimeoutError::Timeout) => result_rx
+                .recv_timeout(Duration::from_secs(1))
+                .expect("FIFO cleanup did not release the blocked enrichment worker"),
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                panic!("the FIFO enrichment worker exited before reporting a result")
+            }
+        };
+        worker.join().unwrap();
+
+        assert!(
+            !timed_out,
+            "a FIFO reference must be rejected or omitted without waiting for a writer"
+        );
+        if let Ok(enriched) = result {
+            let enriched: Value = serde_json::from_slice(&enriched).unwrap();
+            assert!(enriched["params"].get("_firefoxFilePayloads").is_none());
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn skips_a_regular_upload_replaced_with_a_fifo_before_the_read_phase_without_blocking() {
+        let directory = tempfile::tempdir().unwrap();
+        let file = directory.path().join("replaced.txt");
+        fs::write(&file, b"metadata-time contents").unwrap();
+        let payload = file_input_message(&[&file]);
+        let replacement_path = file.clone();
+        let cleanup_fifo = file.clone();
+        let (hook_tx, hook_rx) = mpsc::channel();
+        let (result_tx, result_rx) = mpsc::channel();
+        let worker = thread::spawn(move || {
+            let upstream = AtomicU16::new(0);
+            let result =
+                enrich_native_message_with_pre_read_hook(payload, 54321, &upstream, || {
+                    fs::remove_file(&replacement_path).unwrap();
+                    create_fifo(&replacement_path);
+                    hook_tx.send(()).unwrap();
+                });
+            result_tx.send(result).unwrap();
+        });
+
+        hook_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("the pre-read hook did not replace the prepared regular file");
+        let first_result = result_rx.recv_timeout(Duration::from_millis(250));
+        let timed_out = matches!(first_result, Err(mpsc::RecvTimeoutError::Timeout));
+        if timed_out {
+            let writer = fs::OpenOptions::new()
+                .write(true)
+                .open(&cleanup_fifo)
+                .unwrap();
+            drop(writer);
+        }
+        let result = match first_result {
+            Ok(result) => result,
+            Err(mpsc::RecvTimeoutError::Timeout) => result_rx
+                .recv_timeout(Duration::from_secs(1))
+                .expect("FIFO cleanup did not release the replacement-file enrichment worker"),
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                panic!("the replacement-file enrichment worker exited before reporting a result")
+            }
+        };
+        worker.join().unwrap();
+
+        assert!(
+            !timed_out,
+            "a file replaced with a FIFO before reading must not wait for a writer"
+        );
+        if let Ok(enriched) = result {
+            let enriched: Value = serde_json::from_slice(&enriched).unwrap();
+            assert!(enriched["params"].get("_firefoxFilePayloads").is_none());
+        }
+    }
+
     #[test]
     fn rewrites_nested_websocket_urls() {
         let mut value = json!({"nested": {"url": "ws://localhost:45678/path?token=test"}});
@@ -1059,7 +1571,8 @@ mod tests {
         .unwrap();
         let upstream = AtomicU16::new(0);
         let enriched: Value =
-            serde_json::from_slice(&enrich_native_message(payload, 54321, &upstream)).unwrap();
+            serde_json::from_slice(&enrich_native_message(payload, 54321, &upstream).unwrap())
+                .unwrap();
         assert_eq!(enriched["_firefoxBridgeVersion"], env!("CARGO_PKG_VERSION"));
     }
 

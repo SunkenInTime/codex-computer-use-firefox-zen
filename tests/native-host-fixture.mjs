@@ -61,6 +61,13 @@ function writeEnrichmentOverflow() {
   writeSizedPayload(Buffer.from('{"method":"getInfo","padding":"', "utf8"), Buffer.from('"}', "utf8"), outputLimit);
 }
 
+function writeOversizedFileUpload() {
+  writeFrameAndExit(Buffer.from(JSON.stringify({
+    method: "DOM.setFileInputFiles",
+    params: { files: [file] }
+  }), "utf8"));
+}
+
 function reportTruncatedInputDelivery() {
   let received = false;
   process.stdin.once("data", () => {
@@ -122,6 +129,8 @@ if (mode === "output-at-limit") {
   spawnStderrDescendantThenWriteHeader(outputLimit + 1);
 } else if (mode === "enrichment-overflow") {
   writeEnrichmentOverflow();
+} else if (mode === "oversized-file-upload") {
+  writeOversizedFileUpload();
 } else if (mode === "verify-truncated-input") {
   reportTruncatedInputDelivery();
 } else if (mode === "echo-input") {

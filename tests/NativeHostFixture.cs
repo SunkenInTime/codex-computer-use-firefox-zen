@@ -60,6 +60,11 @@ internal static class NativeHostFixture
             WriteEnrichmentOverflow();
             return 0;
         }
+        if (mode == "oversized-file-upload")
+        {
+            WriteOversizedFileUpload();
+            return 0;
+        }
         if (mode == "verify-truncated-input")
         {
             string result = ReceivesInputWithin(100)
@@ -114,6 +119,14 @@ internal static class NativeHostFixture
         byte[] prefix = Encoding.UTF8.GetBytes("{\"method\":\"getInfo\",\"padding\":\"");
         byte[] suffix = Encoding.UTF8.GetBytes("\"}");
         WriteSizedPayload(prefix, suffix, OutputLimit);
+    }
+
+    private static void WriteOversizedFileUpload()
+    {
+        string file = Environment.GetEnvironmentVariable("CHATGPT_FIREFOX_TEST_FILE") ?? String.Empty;
+        string escaped = file.Replace("\\", "\\\\").Replace("\"", "\\\"");
+        string json = "{\"method\":\"DOM.setFileInputFiles\",\"params\":{\"files\":[\"" + escaped + "\"]}}";
+        WriteFrame(Encoding.UTF8.GetBytes(json));
     }
 
     private static void WriteSizedPayload(byte[] prefix, byte[] suffix, int length)

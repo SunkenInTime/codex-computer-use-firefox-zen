@@ -12,6 +12,7 @@ const isWindows = process.platform === "win32";
 const outputLimit = 1024 * 1024;
 const lingeringHostMilliseconds = 3000;
 const supervisorTerminationMaximumMilliseconds = 1500;
+const smallUploadContents = "Firefox file upload parity\n";
 const bridgeVersion = JSON.parse(fs.readFileSync(path.join(root, "version.json"), "utf8")).version;
 const enrichmentBytes = Buffer.byteLength(`,"_firefoxBridgeVersion":"${bridgeVersion}"`, "utf8");
 const firefoxExtensionId = "codex-computer-use-firefox-zen@sunkenintime";
@@ -23,8 +24,82 @@ const cargoCandidates = [
   "cargo"
 ].filter(Boolean);
 
+function requireWindowsDotNetFramework45() {
+  const releaseKey = "HKLM\\SOFTWARE\\Microsoft\\NET Framework Setup\\NDP\\v4\\Full";
+  const query = spawnSync("reg", ["query", releaseKey, "/v", "Release"], { encoding: "utf8" });
+  const output = `${query.stdout ?? ""}${query.stderr ?? ""}`;
+  assert.equal(
+    query.status,
+    0,
+    `.NET Framework 4.5+ is required to compile the Windows native-host fixture (Release >= 378389). reg query failed: ${output}`
+  );
+  const match = output.match(/Release\s+REG_DWORD\s+(0x[\da-f]+|\d+)/i);
+  assert.ok(
+    match,
+    `.NET Framework 4.5+ is required to compile the Windows native-host fixture (Release >= 378389). The Release registry value was not found.`
+  );
+  const release = Number.parseInt(match[1], /^0x/i.test(match[1]) ? 16 : 10);
+  assert.ok(
+    release >= 378389,
+    `.NET Framework 4.5+ is required to compile the Windows native-host fixture (Release >= 378389). Found Release ${release}.`
+  );
+}
+
+function base64EncodedLength(byteLength) {
+  return 4 * Math.ceil(byteLength / 3);
+}
+
+function rustWindowsExtendedLengthPath(canonicalPath) {
+  if (canonicalPath.startsWith("\\\\?\\")) {
+    return canonicalPath;
+  }
+  if (canonicalPath.startsWith("\\\\")) {
+    return `\\\\?\\UNC\\${canonicalPath.slice(2)}`;
+  }
+  if (/^[a-z]:[\\/]/i.test(canonicalPath)) {
+    return `\\\\?\\${canonicalPath.replaceAll("/", "\\")}`;
+  }
+  return canonicalPath;
+}
+
+function rustCanonicalPath(file) {
+  const canonicalPath = fs.realpathSync(file);
+  return isWindows ? rustWindowsExtendedLengthPath(canonicalPath) : canonicalPath;
+}
+
+function assertWindowsCanonicalPathOracle() {
+  assert.equal(
+    rustWindowsExtendedLengthPath("C:\\native\\fixture.txt"),
+    "\\\\?\\C:\\native\\fixture.txt"
+  );
+  assert.equal(
+    rustWindowsExtendedLengthPath("\\\\server\\share\\fixture.txt"),
+    "\\\\?\\UNC\\server\\share\\fixture.txt"
+  );
+}
+
+function projectedOversizedFileUploadLength(file) {
+  const metadata = fs.statSync(file);
+  const projected = {
+    method: "DOM.setFileInputFiles",
+    params: {
+      files: [file],
+      _firefoxFilePayloads: [{
+        path: rustCanonicalPath(file),
+        name: path.basename(file),
+        type: "text/plain",
+        lastModified: Math.floor(metadata.mtimeMs),
+        data: "A".repeat(base64EncodedLength(metadata.size))
+      }]
+    }
+  };
+  return Buffer.byteLength(JSON.stringify(projected), "utf8");
+}
+
 function createFixture() {
   if (isWindows) {
+    requireWindowsDotNetFramework45();
+    assertWindowsCanonicalPathOracle();
     const csc = path.join(process.env.WINDIR, "Microsoft.NET", "Framework64", "v4.0.30319", "csc.exe");
     const fixture = path.join(temp, "fixture.exe");
     const compilation = spawnSync(csc, [
@@ -145,7 +220,7 @@ function assertFatalBridgeRun(run) {
 }
 
 try {
-  fs.writeFileSync(upload, "Firefox file upload parity\n", "utf8");
+  fs.writeFileSync(upload, smallUploadContents, "utf8");
   const fixture = createFixture();
   const proxy = buildBridge();
 
@@ -157,7 +232,7 @@ try {
     const payloads = message.params.commandParams._firefoxFilePayloads;
     assert.equal(payloads.length, 1);
     assert.equal(payloads[0].name, "firefox-upload.txt");
-    assert.equal(Buffer.from(payloads[0].data, "base64").toString("utf8"), "Firefox file upload parity\n");
+    assert.equal(Buffer.from(payloads[0].data, "base64").toString("utf8"), smallUploadContents);
     const rewrittenUrl = new URL(message.appServerUrl);
     assert.equal(rewrittenUrl.hostname, "127.0.0.1");
     assert.notEqual(rewrittenUrl.port, "45678");
@@ -270,6 +345,24 @@ try {
       `[codex-firefox-bridge] native output message is too large: ${outputLimit + enrichmentBytes}\n`
     );
     assert.equal(run.stdout.length, 0, "Enrichment must not make an oversized message reach Firefox.");
+  }
+
+  if (shouldRun("oversized-file-upload")) {
+    try {
+      fs.writeFileSync(upload, Buffer.alloc(786_432, "x"));
+      const projectedLength = projectedOversizedFileUploadLength(upload);
+      assert.ok(projectedLength > outputLimit, "The oversized fixture must exceed Firefox's native-message limit after enrichment.");
+      const run = await runBridge(proxy, fixture, "oversized-file-upload");
+      assert.equal(run.timedOut, false, "The test harness deadline terminated the bridge instead of a fatal enrichment rejection.");
+      assertFatalBridgeRun(run);
+      assert.equal(
+        run.stderr.toString("utf8"),
+        `[codex-firefox-bridge] native output message is too large: ${projectedLength}\n`
+      );
+      assert.equal(run.stdout.length, 0, "An oversized file upload must not emit a Firefox native-message frame.");
+    } finally {
+      fs.writeFileSync(upload, smallUploadContents, "utf8");
+    }
   }
 
   if (shouldRun("truncated-input")) {
