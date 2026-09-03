@@ -23,6 +23,7 @@ const CODEX_VERSION_TIMEOUT: Duration = Duration::from_secs(2);
 #[derive(Debug, PartialEq)]
 struct AppServerRuntime {
     codex_cli: PathBuf,
+    code_mode_host: PathBuf,
     node: PathBuf,
     browser_client: PathBuf,
     node_repl: PathBuf,
@@ -66,7 +67,7 @@ fn run() -> Result<i32, Box<dyn std::error::Error>> {
 
     let host_path = discover_original_host()?;
     let mut command = Command::new(&host_path);
-    let fallback_registry = configure_app_server_runtime(&mut command, &host_path);
+    let runtime_files = configure_app_server_runtime(&mut command, &host_path);
     command
         .arg(OFFICIAL_CHROME_ORIGIN)
         .current_dir(host_path.parent().unwrap_or_else(|| Path::new(".")))
@@ -100,14 +101,31 @@ fn run() -> Result<i32, Box<dyn std::error::Error>> {
     let _ = output_thread.join();
     let _ = error_thread.join();
     drop(input_thread);
-    drop(fallback_registry);
+    drop(runtime_files);
     Ok(status.code().unwrap_or(1))
 }
 
-fn configure_app_server_runtime(command: &mut Command, host_path: &Path) -> Option<TempDir> {
-    let runtime = discover_app_server_runtime()?;
+fn configure_app_server_runtime(command: &mut Command, host_path: &Path) -> Vec<TempDir> {
+    let Some(runtime) = discover_app_server_runtime() else {
+        return Vec::new();
+    };
+    let mut runtime_files = Vec::new();
+    let codex_cli = if env::var_os("CODEX_CLI_PATH").is_none() {
+        match stage_codex_runtime(&runtime) {
+            Ok((directory, codex_cli)) => {
+                runtime_files.push(directory);
+                codex_cli
+            }
+            Err(error) => {
+                eprintln!("[codex-firefox-bridge] failed to pin Codex runtime files: {error}");
+                runtime.codex_cli.clone()
+            }
+        }
+    } else {
+        runtime.codex_cli.clone()
+    };
     for (variable, value) in [
-        ("CODEX_CLI_PATH", runtime.codex_cli.clone()),
+        ("CODEX_CLI_PATH", codex_cli),
         ("CODEX_BROWSER_USE_NODE_PATH", runtime.node.clone()),
         ("CODEX_BROWSER_CLIENT_PATH", runtime.browser_client.clone()),
         ("CODEX_NODE_REPL_PATH", runtime.node_repl.clone()),
@@ -117,12 +135,13 @@ fn configure_app_server_runtime(command: &mut Command, host_path: &Path) -> Opti
         }
     }
 
-    if has_registered_app_server() {
-        return None;
+    if !has_registered_app_server() {
+        if let Ok(directory) = create_fallback_app_server_registry(host_path, &runtime) {
+            command.env("CODEX_HOME", directory.path());
+            runtime_files.push(directory);
+        }
     }
-    let directory = create_fallback_app_server_registry(host_path, &runtime).ok()?;
-    command.env("CODEX_HOME", directory.path());
-    Some(directory)
+    runtime_files
 }
 
 fn discover_app_server_runtime() -> Option<AppServerRuntime> {
@@ -189,6 +208,11 @@ fn chatgpt_resource_candidates_for(platform: &str, home: Option<&Path>) -> Vec<P
 fn app_server_runtime_from_resources(resources: &Path) -> Option<AppServerRuntime> {
     let runtime = AppServerRuntime {
         codex_cli: resources.join("codex"),
+        code_mode_host: resources.join(if cfg!(windows) {
+            "codex-code-mode-host.exe"
+        } else {
+            "codex-code-mode-host"
+        }),
         node: resources.join("cua_node/bin/node"),
         browser_client: resources
             .join("plugins/openai-bundled/plugins/chrome/scripts/browser-client.mjs"),
@@ -196,6 +220,7 @@ fn app_server_runtime_from_resources(resources: &Path) -> Option<AppServerRuntim
     };
     [
         &runtime.codex_cli,
+        &runtime.code_mode_host,
         &runtime.node,
         &runtime.browser_client,
         &runtime.node_repl,
@@ -226,6 +251,34 @@ fn app_server_registry_candidates() -> Vec<PathBuf> {
         }
     }
     candidates
+}
+
+fn stage_codex_runtime(runtime: &AppServerRuntime) -> io::Result<(TempDir, PathBuf)> {
+    let directory = tempfile::Builder::new()
+        .prefix("codex-firefox-bridge-app-server-")
+        .tempdir()?;
+    let codex_cli =
+        directory
+            .path()
+            .join(runtime.codex_cli.file_name().ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidInput, "invalid Codex CLI path")
+            })?);
+    let code_mode_host = directory
+        .path()
+        .join(runtime.code_mode_host.file_name().ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidInput, "invalid code-mode host path")
+        })?);
+
+    // Keep a running app-server and its strict IPC peer on the same inodes when
+    // an app updater atomically replaces the installed bundle beneath them.
+    for (source, destination) in [
+        (&runtime.codex_cli, &codex_cli),
+        (&runtime.code_mode_host, &code_mode_host),
+    ] {
+        fs::hard_link(source, destination)
+            .or_else(|_| fs::copy(source, destination).map(|_| ()))?;
+    }
+    Ok((directory, codex_cli))
 }
 
 fn registry_has_entries(path: &Path) -> bool {
@@ -1039,12 +1092,8 @@ mod tests {
     fn discovers_linux_chatgpt_app_resources() {
         let paths = chatgpt_resource_candidates_for("linux", Some(Path::new("/home/test")));
         assert!(paths.contains(&PathBuf::from("/usr/lib/chatgpt/resources")));
-        assert!(paths.contains(&PathBuf::from(
-            "/home/test/.local/opt/chatgpt/resources"
-        )));
-        assert!(paths.contains(&PathBuf::from(
-            "/home/test/.local/share/chatgpt/resources"
-        )));
+        assert!(paths.contains(&PathBuf::from("/home/test/.local/opt/chatgpt/resources")));
+        assert!(paths.contains(&PathBuf::from("/home/test/.local/share/chatgpt/resources")));
     }
 
     #[test]
@@ -1079,6 +1128,11 @@ mod tests {
             temp.join("plugins/openai-bundled/plugins/chrome/scripts/browser-client.mjs");
         for path in [
             temp.join("codex"),
+            temp.join(if cfg!(windows) {
+                "codex-code-mode-host.exe"
+            } else {
+                "codex-code-mode-host"
+            }),
             temp.join("cua_node/bin/node"),
             temp.join("cua_node/bin/node_repl"),
             browser_client.clone(),
@@ -1091,6 +1145,11 @@ mod tests {
             app_server_runtime_from_resources(temp),
             Some(AppServerRuntime {
                 codex_cli: temp.join("codex"),
+                code_mode_host: temp.join(if cfg!(windows) {
+                    "codex-code-mode-host.exe"
+                } else {
+                    "codex-code-mode-host"
+                }),
                 node: temp.join("cua_node/bin/node"),
                 browser_client,
                 node_repl: temp.join("cua_node/bin/node_repl"),
@@ -1108,6 +1167,9 @@ mod tests {
     fn creates_a_v2_fallback_registry_entry_for_firefox() {
         let runtime = AppServerRuntime {
             codex_cli: PathBuf::from("/Applications/ChatGPT.app/Contents/Resources/codex"),
+            code_mode_host: PathBuf::from(
+                "/Applications/ChatGPT.app/Contents/Resources/codex-code-mode-host",
+            ),
             node: PathBuf::from("/Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node"),
             browser_client: PathBuf::from(
                 "/Applications/ChatGPT.app/Contents/Resources/plugins/openai-bundled/plugins/chrome/scripts/browser-client.mjs",
@@ -1150,6 +1212,51 @@ mod tests {
             "authenticated"
         );
         assert!(!target.path().join("chrome-native-hosts-v2.json").exists());
+    }
+
+    #[test]
+    fn pins_code_mode_ipc_peer_before_an_in_place_app_update() {
+        let resources = tempfile::tempdir().unwrap();
+        let codex_cli = resources.path().join("codex");
+        let code_mode_host = resources.path().join(if cfg!(windows) {
+            "codex-code-mode-host.exe"
+        } else {
+            "codex-code-mode-host"
+        });
+        fs::write(&codex_cli, "codex 0.151").unwrap();
+
+        let frame = |payload: &str| {
+            let mut frame = (payload.len() as u32).to_le_bytes().to_vec();
+            frame.extend(payload.as_bytes());
+            frame
+        };
+        let old_frame =
+            frame(r#"{"Result":{"cell_id":"cell-1","content_items":[],"error_text":null}}"#);
+        fs::write(&code_mode_host, &old_frame).unwrap();
+
+        let runtime = AppServerRuntime {
+            codex_cli,
+            code_mode_host: code_mode_host.clone(),
+            node: resources.path().join("node"),
+            browser_client: resources.path().join("browser-client.mjs"),
+            node_repl: resources.path().join("node_repl"),
+        };
+        let (_snapshot, staged_cli) = stage_codex_runtime(&runtime).unwrap();
+        let staged_host = staged_cli
+            .parent()
+            .unwrap()
+            .join(code_mode_host.file_name().unwrap());
+
+        let new_frame = frame(
+            r#"{"Result":{"cell_id":"cell-1","content_items":[],"error_text":null,"code_mode_host_duration_ns":1}}"#,
+        );
+        let replacement = resources.path().join("replacement-host");
+        fs::write(&replacement, &new_frame).unwrap();
+        fs::remove_file(&code_mode_host).unwrap();
+        fs::rename(replacement, &code_mode_host).unwrap();
+
+        assert_eq!(fs::read(staged_host).unwrap(), old_frame);
+        assert_eq!(fs::read(code_mode_host).unwrap(), new_frame);
     }
 
     #[test]
