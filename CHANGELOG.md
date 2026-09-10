@@ -6,6 +6,8 @@ Git tag.
 
 ## 1.4.11 - Unreleased
 
+- Automate Firefox Add-ons submission after tagged npm releases, with a read-only AMO authentication check and matching review-source upload.
+
 - Support `Page.setLifecycleEventsEnabled` during Codex tab attachment, fixing
   the unsupported-command error that prevented direct Firefox/Zen control.
 - Translate navigation init, DOMContentLoaded, and load notifications into

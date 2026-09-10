@@ -5,13 +5,39 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      check_auth:
+        description: Check AMO credentials and add-on ownership without publishing
+        type: boolean
+        default: false
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 permissions:
   contents: write
   id-token: write
 
 jobs:
+  auth-check:
+    if: (github.event_name == 'push' && github.ref_type == 'tag') || inputs.check_auth == true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Verify AMO credentials and add-on ownership
+        env:
+          AMO_JWT_ISSUER: ${{ secrets.AMO_JWT_ISSUER }}
+          AMO_JWT_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+        run: node scripts/check-amo-auth.mjs
+
   verify:
+    if: inputs.check_auth != true
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -27,6 +53,7 @@ jobs:
           path: dist/*
 
   windows-companion:
+    if: inputs.check_auth != true
     runs-on: windows-latest
     env:
       WINDOWS_SIGNING_CERTIFICATE_PFX: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_PFX }}
@@ -76,6 +103,7 @@ jobs:
           path: dist/*
 
   macos-companion:
+    if: inputs.check_auth != true
     runs-on: macos-14
     env:
       MACOS_INSTALLER_CERTIFICATE_P12: ${{ secrets.MACOS_INSTALLER_CERTIFICATE_P12 }}
@@ -160,6 +188,7 @@ jobs:
           path: dist/*
 
   linux-companion:
+    if: inputs.check_auth != true
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -189,6 +218,7 @@ jobs:
           path: dist/*
 
   npm-package:
+    if: inputs.check_auth != true
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -207,8 +237,8 @@ jobs:
           path: dist/*.tgz
 
   publish:
-    if: github.ref_type == 'tag'
-    needs: [verify, windows-companion, macos-companion, linux-companion, npm-package]
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    needs: [auth-check, verify, windows-companion, macos-companion, linux-companion, npm-package]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -221,7 +251,7 @@ jobs:
           files: release/*
 
   publish-npm:
-    if: github.ref_type == 'tag'
+    if: github.event_name == 'push' && github.ref_type == 'tag'
     needs: [npm-package, publish]
     runs-on: ubuntu-latest
     steps:
@@ -234,7 +264,7 @@ jobs:
         run: npm publish ./npm --access public --provenance
 
   release-smoke:
-    if: github.ref_type == 'tag'
+    if: github.event_name == 'push' && github.ref_type == 'tag'
     needs: [publish, publish-npm]
     runs-on: macos-14
     steps:
@@ -289,7 +319,7 @@ jobs:
           test "$("$binary" --version)" = "$version"
 
   linux-release-smoke:
-    if: github.ref_type == 'tag'
+    if: github.event_name == 'push' && github.ref_type == 'tag'
     needs: [publish, publish-npm]
     runs-on: ubuntu-latest
     steps:
@@ -330,3 +360,36 @@ jobs:
           test "$("$binary" --version)" = "$version"
           zen_binary="$(node -p "JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8')).path" "$zen_manifest")"
           test "$binary" = "$zen_binary"
+
+  publish-amo:
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    needs: [auth-check, release-smoke, linux-release-smoke]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@v4
+        with:
+          name: firefox-extension
+          path: dist
+      - name: Prepare matching source and release notes
+        run: node scripts/prepare-amo-metadata.mjs
+      - name: Submit update to the existing Firefox Add-ons listing
+        env:
+          WEB_EXT_API_KEY: ${{ secrets.AMO_JWT_ISSUER }}
+          WEB_EXT_API_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./version.json').version")"
+          npx --yes web-ext@10.6.0 sign \
+            --source-dir extension \
+            --channel listed \
+            --upload-source-code "dist/codex-computer-use-firefox-zen-${version}-source.zip" \
+            --amo-metadata dist/amo-metadata.json \
+            --approval-timeout 0 \
+            --no-input
+          echo "Submitted to AMO; Mozilla approval may still be pending." >> "$GITHUB_STEP_SUMMARY"
