@@ -1134,7 +1134,17 @@
             viewportSize: { height: n.innerHeight, width: n.innerWidth },
           };
         }
-        return { result: { type: "object", value: hitTestAccessibilityNode.call(nodeFromPayload()) } };
+        try {
+          return { result: { type: "object", value: hitTestAccessibilityNode.call(nodeFromPayload()) } };
+        } catch (error) {
+          return {
+            result: { type: "undefined" },
+            exceptionDetails: {
+              text: error?.message ?? String(error), lineNumber: 0, columnNumber: 0,
+              exception: { type: "object", subtype: "error", className: error?.name ?? "Error", description: String(error) },
+            },
+          };
+        }
       }
       case "releaseObject": {
         state.objects.delete(payload.objectId);
