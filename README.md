@@ -164,7 +164,9 @@ npm run package
 
 `npm test` checks synchronized release versions, the manifest and compatibility surface, bridge/extension version reporting, and the native protocol, upload, and WebSocket-relay integrations. Packaging writes the unsigned extension archive, a matching review-source archive, and SHA-256 checksums to `dist/`.
 
-Pushing a semantic-version tag such as `v1.4.7` runs the release workflow. It builds and tests the extension, Windows installer, universal macOS package, and Linux x64 binary; verifies all release versions; publishes npm with provenance; attaches release artifacts; and smoke-tests a clean install of the exact public npm version on macOS and Linux. Submit the matching signed Firefox add-on to AMO only after that smoke test passes.
+Pushing a semantic-version tag such as `v1.4.11` runs the release workflow. It checks Mozilla Add-ons credentials, builds and tests every platform, publishes GitHub assets and then npm with OIDC provenance, and smoke-tests the public npm install on macOS and Linux. After those checks pass, CI submits the listed Firefox add-on with its matching review source and release notes. Mozilla approval may remain pending after submission.
+
+Configure `AMO_JWT_ISSUER` and `AMO_JWT_SECRET` as repository Actions secrets using an author's [Mozilla API credentials](https://addons.mozilla.org/developers/addon/api/key/). npm uses the existing trusted publisher for `release.yml` and does not need an npm token. Run `gh workflow run release.yml --ref main -f check_auth=true` to verify AMO access without uploading a version. Other manual runs build candidates only; publishing requires a tag push. See [release authentication and publication steps](RELEASE_1.4.11.md).
 
 Prepare a release with:
 
