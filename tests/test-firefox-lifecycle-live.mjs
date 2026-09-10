@@ -98,6 +98,13 @@ for(const type of ['mouseMoved','mousePressed','mouseReleased'])await chrome.deb
 await chrome.debugger.sendCommand(debuggee,'Input.insertText',{text:'icarus'});
 const typed=await chrome.debugger.sendCommand(debuggee,'Accessibility.getFullAXTree',{});
 if(typed.nodes.find(n=>n.name?.value==='Repository search')?.value?.value!=='icarus')throw Error('Click and type did not update input');
+for(const modifiers of [4,2]){
+  if(modifiers===2)await chrome.debugger.sendCommand(debuggee,'Input.insertText',{text:'icarus'});
+  for(const type of ['keyDown','keyUp'])await chrome.debugger.sendCommand(debuggee,'Input.dispatchKeyEvent',{type,key:'a',code:'KeyA',modifiers,windowsVirtualKeyCode:65});
+  for(const type of ['keyDown','keyUp'])await chrome.debugger.sendCommand(debuggee,'Input.dispatchKeyEvent',{type,key:'Backspace',code:'Backspace',modifiers:0,windowsVirtualKeyCode:8});
+  const cleared=await chrome.debugger.sendCommand(debuggee,'Accessibility.getFullAXTree',{});
+  if(cleared.nodes.find(n=>n.name?.value==='Repository search')?.value?.value!=='')throw Error('Select-all and Backspace did not clear input (modifiers='+modifiers+')');
+}
 await chrome.debugger.sendCommand(debuggee,'Runtime.releaseObject',{objectId:resolved.object.objectId});
 const released=await chrome.debugger.sendCommand(debuggee,'Runtime.callFunctionOn',{objectId:resolved.object.objectId,functionDeclaration:${JSON.stringify(axFunctions.hitTest)},arguments:[{}],returnByValue:true});
 if(released.result?.type!=='undefined'||!released.exceptionDetails?.text)throw Error('Released handle must return CDP exceptionDetails');
@@ -107,7 +114,7 @@ const releasedGroup=await chrome.debugger.sendCommand(debuggee,'Runtime.callFunc
 if(!releasedGroup.exceptionDetails?.text)throw Error('Group cleanup retained the handle');
 const activeAfter=(await browser.tabs.query({active:true,currentWindow:true}))[0];
 if(activeAfter.id!==foreground.id||activations.includes(target.id))throw Error('CSP click activated background tab');
-await fetch(${JSON.stringify(url + "/result")},{method:'POST',body:JSON.stringify({ok:true,backgroundTabPreserved:true,strictCspAxClickAndType:true,objectCleanupAndExceptionContract:true,lifecycle:lifecycle.map(e=>e.params.name),loaderId:lastLoad.params.loaderId})});
+await fetch(${JSON.stringify(url + "/result")},{method:'POST',body:JSON.stringify({ok:true,backgroundTabPreserved:true,strictCspAxClickTypeAndClear:true,objectCleanupAndExceptionContract:true,lifecycle:lifecycle.map(e=>e.params.name),loaderId:lastLoad.params.loaderId})});
 }catch(e){await fetch(${JSON.stringify(url + "/result")},{method:'POST',body:JSON.stringify({ok:false,error:String(e)+' '+e.stack})});}})();`,
 );
 const child = spawn(
