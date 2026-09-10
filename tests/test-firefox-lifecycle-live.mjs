@@ -35,7 +35,9 @@ const manifest = {
 fs.writeFileSync(path.join(dir, "manifest.json"), JSON.stringify(manifest));
 let finish;
 const result = new Promise((r) => (finish = r));
+const requests = [];
 const server = http.createServer((req, res) => {
+  requests.push(req.url);
   if (req.url === "/result") {
     let body = "";
     req.on("data", (x) => (body += x));
@@ -57,8 +59,8 @@ fs.writeFileSync(
   path.join(dir, "test.js"),
   `(async()=>{try{
 const target=await browser.tabs.create({url:${JSON.stringify(url)},active:true});
-for(let i=0;i<100&&(await browser.tabs.get(target.id)).status!=='complete';i++)await new Promise(r=>setTimeout(r,100));
-if((await browser.tabs.get(target.id)).status!=='complete')throw Error('Initial fixture did not load');
+for(let i=0;i<300&&(await browser.tabs.get(target.id)).status!=='complete';i++)await new Promise(r=>setTimeout(r,100));
+if((await browser.tabs.get(target.id)).status!=='complete')throw Error('Initial fixture did not load: '+JSON.stringify(await browser.tabs.get(target.id)));
 const foreground=await browser.tabs.create({url:${JSON.stringify(url + "/foreground")},active:true});
 const activations=[];browser.tabs.onActivated.addListener(info=>activations.push(info.tabId));
 const debuggee={tabId:target.id};const events=[];
@@ -131,6 +133,7 @@ const timeout = setTimeout(
   90000,
 );
 const outcome = await result;
+if (!outcome.ok) Object.assign(outcome, { requests, logs });
 clearTimeout(timeout);
 try {
   if (process.platform === "win32")
