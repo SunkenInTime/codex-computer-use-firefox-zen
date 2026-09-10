@@ -39,6 +39,7 @@ let allWebsiteAccessGranted = true;
 let captureVisibleTabCalls = [];
 let targetTabActive = true;
 let strictCspEnabled = false;
+let strictCspDynamicEvaluationAttempts = 0;
 const tabUpdateCalls = [];
 const nativePostedMessages = [];
 const nativePort = {
@@ -49,7 +50,14 @@ const nativePort = {
 };
 
 class StrictCspEvent {
-  constructor(type, init = {}) { this.type = type; Object.assign(this, init); }
+  constructor(type, init = {}) {
+    this.type = type;
+    this.defaultPrevented = false;
+    Object.assign(this, init);
+  }
+  preventDefault() {
+    if (this.cancelable) this.defaultPrevented = true;
+  }
 }
 class StrictCspElement {}
 class StrictCspHtmlElement extends StrictCspElement {
@@ -60,12 +68,22 @@ class StrictCspHtmlElement extends StrictCspElement {
     this.childNodes = [];
     this.children = [];
     this.events = [];
+    this.eventListeners = new Map();
     this.isConnected = true;
     this.isContentEditable = false;
     this.shadowRoot = null;
   }
   closest(selector) { return selector.includes("input") ? this : null; }
-  dispatchEvent(event) { this.events.push(event); return true; }
+  addEventListener(type, listener) {
+    const listeners = this.eventListeners.get(type) ?? [];
+    listeners.push(listener);
+    this.eventListeners.set(type, listeners);
+  }
+  dispatchEvent(event) {
+    this.events.push(event);
+    for (const listener of [...(this.eventListeners.get(event.type) ?? [])]) listener.call(this, event);
+    return !event.defaultPrevented;
+  }
   focus() {}
   getAttribute(name) { return this.attributeValues.get(name) ?? null; }
   hasAttribute(name) { return this.attributeValues.has(name); }
@@ -93,15 +111,83 @@ class StrictCspInputElement extends StrictCspHtmlElement {
   }
 }
 class StrictCspTextAreaElement extends StrictCspInputElement {}
+class StrictCspSelectElement extends StrictCspHtmlElement {
+  constructor(values = ["Alpha", "Beta", "Gamma"], { multiple = false } = {}) {
+    super();
+    this.disabled = false;
+    this.localName = "select";
+    this.multiple = multiple;
+    this.nodeName = "SELECT";
+    this.options = values.map((value) => ({ disabled: false, label: value, selected: false, value }));
+    this.setSelectedIndices([0]);
+    this.tagName = "SELECT";
+  }
+  get selectedIndex() { return this.options.findIndex((option) => option.selected); }
+  set selectedIndex(index) {
+    for (const [optionIndex, option] of this.options.entries()) option.selected = optionIndex === index;
+  }
+  setSelectedIndices(indices) {
+    const selected = new Set(indices);
+    for (const [optionIndex, option] of this.options.entries()) option.selected = selected.has(optionIndex);
+  }
+  get value() { return this.options[this.selectedIndex]?.value ?? ""; }
+}
+class StrictCspScrollElement extends StrictCspHtmlElement {
+  constructor({ clientHeight = 144, clientWidth = 722, scrollHeight = 484, scrollWidth = 722 } = {}) {
+    super();
+    this.clientHeight = clientHeight;
+    this.clientWidth = clientWidth;
+    this.parentElement = null;
+    this.scrollHeight = scrollHeight;
+    this.scrollLeft = 0;
+    this.scrollTop = 0;
+    this.scrollWidth = scrollWidth;
+    this.tagName = "DIV";
+  }
+  scrollBy({ left = 0, top = 0 }) {
+    this.scrollLeft = Math.max(0, Math.min(this.scrollWidth - this.clientWidth, this.scrollLeft + left));
+    this.scrollTop = Math.max(0, Math.min(this.scrollHeight - this.clientHeight, this.scrollTop + top));
+  }
+}
+class StrictCspButtonElement extends StrictCspHtmlElement {
+  constructor() {
+    super();
+    this.clickCount = 0;
+    this.tagName = "BUTTON";
+  }
+  click() { this.clickCount += 1; }
+}
 class StrictCspFrameElement extends StrictCspHtmlElement {}
 const strictCspInput = new StrictCspInputElement();
+const controlledUploadInput = new StrictCspInputElement();
+controlledUploadInput.type = "file";
+controlledUploadInput.attributeValues.set("aria-label", "Controlled upload");
+const strictCspSelect = new StrictCspSelectElement();
+const strictCspScroll = new StrictCspScrollElement();
+const strictCspShadowButton = new StrictCspButtonElement();
+const strictCspShadowHost = new StrictCspHtmlElement();
+strictCspShadowHost.shadowRoot = { elementFromPoint: () => strictCspShadowButton };
+let strictCspHitTarget = strictCspInput;
+let strictCspFrameHit = null;
+const strictCspChildFrameScrolls = [];
+const strictCspPageScrolls = [];
+const strictCspControlCandidates = [controlledUploadInput];
 const strictCspDocument = {
   activeElement: strictCspInput,
   body: strictCspInput,
+  childNodes: [strictCspInput, controlledUploadInput],
   documentElement: strictCspInput,
-  elementFromPoint: () => strictCspInput,
+  elementFromPoint: () => strictCspHitTarget,
   hasFocus: () => true,
-  querySelectorAll: () => [],
+  querySelector(selector) {
+    return selector === 'input[type="file"]' ? controlledUploadInput : null;
+  },
+  querySelectorAll(selector) {
+    if (selector === 'input[type="file"]' || selector === "input,textarea,select,button,[aria-label]") {
+      return selector === 'input[type="file"]' ? [controlledUploadInput] : strictCspControlCandidates;
+    }
+    return [];
+  },
 };
 const strictCspPage = {
   document: strictCspDocument,
@@ -109,26 +195,39 @@ const strictCspPage = {
   Element: StrictCspElement,
   HTMLElement: StrictCspHtmlElement,
   HTMLInputElement: StrictCspInputElement,
+  HTMLSelectElement: StrictCspSelectElement,
   HTMLTextAreaElement: StrictCspTextAreaElement,
   HTMLIFrameElement: StrictCspFrameElement,
   HTMLFrameElement: StrictCspFrameElement,
   InputEvent: StrictCspEvent,
+  Event: StrictCspEvent,
   KeyboardEvent: StrictCspEvent,
   MouseEvent: StrictCspEvent,
   PointerEvent: StrictCspEvent,
   WheelEvent: StrictCspEvent,
   ClipboardEvent: undefined,
   DataTransfer: undefined,
-  getComputedStyle: () => ({ display: "block", opacity: "1", pointerEvents: "auto", visibility: "visible" }),
+  getComputedStyle: (element) => ({
+    display: "block",
+    opacity: "1",
+    overflow: element instanceof StrictCspScrollElement ? "auto" : "visible",
+    overflowX: element instanceof StrictCspScrollElement ? "auto" : "visible",
+    overflowY: element instanceof StrictCspScrollElement ? "auto" : "visible",
+    pointerEvents: "auto",
+    visibility: "visible",
+  }),
   innerHeight: 800,
   innerWidth: 1200,
   Map,
   Set,
   WeakMap,
+  dispatchEvent: () => true,
+  scrollBy: (details) => strictCspPageScrolls.push(details),
 };
 strictCspPage.window = strictCspPage;
 strictCspDocument.defaultView = strictCspPage;
 strictCspInput.ownerDocument = strictCspDocument;
+controlledUploadInput.ownerDocument = strictCspDocument;
 const strictCspPageContext = vm.createContext(strictCspPage, {
   codeGeneration: { strings: false, wasm: false },
 });
@@ -212,8 +311,13 @@ const browser = {
           value = target.frameIds?.[0] === 7
             ? { focused: true, meaningful: true, frameOwner: false }
             : { focused: false, meaningful: false, frameOwner: false };
+        } else if (args[0] === "hitTestFrame") {
+          value = target.frameIds?.[0] === 0 ? strictCspFrameHit : null;
+        } else if (target.frameIds?.[0] === 7 && args[0] === "synthesizeScroll") {
+          strictCspChildFrameScrolls.push(args[1]);
+          value = {};
         } else if ([
-          "dispatchKeyboard", "dispatchMouse", "playwrightDomSnapshot", "visibleDomPoint", "visibleDomSnapshot",
+          "dispatchKeyboard", "dispatchMouse", "installPlaywrightHelper", "synthesizeScroll", "playwrightDomSnapshot", "visibleDomPoint", "visibleDomSnapshot",
           "virtualClipboard", "virtualClipboardCommitCut",
         ].includes(args[0])) {
           value = executeInStrictCspPage(func, args);
@@ -221,6 +325,54 @@ const browser = {
           value = { node: { nodeId: 3, backendNodeId: 3, nodeType: 1, nodeName: "IFRAME", localName: "iframe", nodeValue: "", childNodeCount: 0, attributes: ["src", "https://child.test/"], __frameOwnerIndex: 0, __sameUrlOwnerIndex: 0, __resolvedFrameUrl: "https://child.test/" } };
         } else if (args[0] === "describeNode" && args[1].nodeId === 4) {
           value = { node: { nodeId: 4, backendNodeId: 4, nodeType: 1, nodeName: "DIV", localName: "div", nodeValue: "", childNodeCount: 0, attributes: [] } };
+        } else if (args[0] === "getDocument") {
+          value = {
+            root: {
+              nodeId: 1,
+              backendNodeId: 1,
+              nodeType: 9,
+              nodeName: "#document",
+              localName: "",
+              nodeValue: "",
+              childNodeCount: 1,
+              attributes: [],
+              children: [{
+                nodeId: 2,
+                backendNodeId: 2,
+                nodeType: 1,
+                nodeName: "INPUT",
+                localName: "input",
+                nodeValue: "",
+                childNodeCount: 0,
+                attributes: ["type", "file", "aria-label", "Controlled upload"],
+              }],
+            },
+          };
+        } else if (args[0] === "querySelector" && args[1].selector === 'input[type="file"]') {
+          value = { nodeId: 2 };
+        } else if (args[0] === "describeNode" && args[1].nodeId === 2) {
+          value = {
+            node: {
+              nodeId: 2,
+              backendNodeId: 2,
+              nodeType: 1,
+              nodeName: "INPUT",
+              localName: "input",
+              nodeValue: "",
+              childNodeCount: 0,
+              attributes: ["type", "file", "aria-label", "Controlled upload"],
+            },
+          };
+        } else if (args[0] === "resolveNode" && args[1].nodeId === 2) {
+          value = {
+            object: {
+              type: "object",
+              subtype: "node",
+              className: "HTMLInputElement",
+              description: "input",
+              objectId: "firefox-object-2",
+            },
+          };
         }
         return [{ frameId: target.frameIds?.[0] ?? 0, result: value }];
       }
@@ -233,6 +385,7 @@ const browser = {
         } }];
       }
       if (strictCspEnabled) {
+        strictCspDynamicEvaluationAttempts += 1;
         return [{ frameId: target.frameIds?.[0] ?? 0, error: { message: "call to eval() blocked by Content Security Policy" } }];
       }
       const sourceText = args[0];
@@ -473,6 +626,17 @@ await compat.debugger.sendCommand({ tabId: 1 }, "Runtime.evaluate", {
 });
 assert.equal(JSON.stringify(executedTargets.at(-1).frameIds), "[7]", "Focused cross-origin clipboard evaluation was not tunneled into the child frame.");
 
+const unrecognizedPlaywrightHelperExpression = "globalThis.__codexPlaywrightInjected.unrecognizedHelperCall()";
+const nonCspUnrecognizedHelperEvaluation = await compat.debugger.sendCommand({ tabId: 1 }, "Runtime.evaluate", {
+  expression: unrecognizedPlaywrightHelperExpression,
+  returnByValue: true,
+});
+assert.equal(
+  nonCspUnrecognizedHelperEvaluation.result.value,
+  "child-evaluation",
+  "Outside strict CSP, an unrecognized Playwright helper expression must preserve normal dynamic evaluation.",
+);
+
 const browserUseBindingName = "__browserUseClipboard_strict_csp_test";
 strictCspEnabled = true;
 const strictCspOperationStart = cspSafeOperations.length;
@@ -522,10 +686,107 @@ assert.equal(cspSafeOperations.at(-1).target.frameIds[0], 7, "Strict-CSP typing 
 
 await compat.debugger.sendCommand({ tabId: 1 }, "Input.dispatchKeyEvent", { type: "char", key: "!", text: "!" });
 assert.equal(strictCspInput.value, `${typedText}!`, "Input.dispatchKeyEvent type=char must insert its text.");
+strictCspDocument.activeElement = strictCspSelect;
+await compat.debugger.sendCommand({ tabId: 1 }, "Input.dispatchKeyEvent", { type: "keyDown", key: "ArrowDown", code: "ArrowDown" });
+await compat.debugger.sendCommand({ tabId: 1 }, "Input.dispatchKeyEvent", { type: "keyDown", key: "ArrowDown", code: "ArrowDown" });
+assert.equal(strictCspSelect.value, "Gamma", "ArrowDown must change the focused Firefox select option.");
+assert.deepEqual(
+  strictCspSelect.events.filter(({ type }) => type === "input" || type === "change").map(({ type }) => type),
+  ["input", "change", "input", "change"],
+  "Keyboard selection must notify page code through input and change events.",
+);
+strictCspDocument.activeElement = strictCspInput;
+strictCspHitTarget = strictCspScroll;
+await compat.debugger.sendCommand({ tabId: 1 }, "Input.dispatchMouseEvent", { type: "mouseWheel", x: 20, y: 30, deltaX: 0, deltaY: 420 });
+assert.equal(strictCspScroll.scrollTop, 340, "A wheel over a scrollable element must move that element to its scroll boundary.");
+assert.equal(strictCspPageScrolls.length, 0, "Nested scrolling must not move the page when the inner element can consume the wheel delta.");
+strictCspScroll.scrollTop = 0;
+strictCspPageScrolls.length = 0;
+await compat.debugger.sendCommand({ tabId: 1 }, "Input.synthesizeScrollGesture", { x: 20, y: 30, xDistance: 0, yDistance: -420 });
+assert.equal(strictCspScroll.scrollTop, 340, "A synthesized gesture over a scrollable element must move that element to its scroll boundary.");
+assert.equal(strictCspPageScrolls.length, 0, "A nested synthesized gesture must not move the page when the inner element can consume it.");
+
+strictCspScroll.scrollTop = 0;
+strictCspScroll.addEventListener("wheel", (event) => event.preventDefault());
+await compat.debugger.sendCommand({ tabId: 1 }, "Input.dispatchMouseEvent", { type: "mouseWheel", x: 20, y: 30, deltaX: 0, deltaY: 120 });
+assert.equal(
+  strictCspScroll.scrollTop,
+  0,
+  "Canceling a synthetic wheel event must prevent the bridge from performing its default scroll action.",
+);
+
+const diagonalOuterScroll = new StrictCspScrollElement({ clientHeight: 100, clientWidth: 100, scrollHeight: 100, scrollWidth: 400 });
+const diagonalInnerScroll = new StrictCspScrollElement({ clientHeight: 100, clientWidth: 100, scrollHeight: 400, scrollWidth: 100 });
+diagonalInnerScroll.parentElement = diagonalOuterScroll;
+strictCspHitTarget = diagonalInnerScroll;
+await compat.debugger.sendCommand({ tabId: 1 }, "Input.dispatchMouseEvent", { type: "mouseWheel", x: 20, y: 30, deltaX: 120, deltaY: 160 });
+assert.equal(diagonalInnerScroll.scrollTop, 160, "The first vertically eligible scroller must consume the vertical axis.");
+assert.equal(diagonalOuterScroll.scrollLeft, 120, "An unconsumed horizontal axis must continue to the next eligible ancestor scroller.");
+
+const multiSelect = new StrictCspSelectElement(["Alpha", "Beta", "Gamma"], { multiple: true });
+multiSelect.setSelectedIndices([0, 2]);
+strictCspDocument.activeElement = multiSelect;
+await compat.debugger.sendCommand({ tabId: 1 }, "Input.dispatchKeyEvent", { type: "keyDown", key: "ArrowDown", code: "ArrowDown" });
+assert.deepEqual(
+  multiSelect.options.map((option) => option.selected),
+  [true, false, true],
+  "An unmodified ArrowDown in a multi-select must not collapse its selected-option set.",
+);
+assert.deepEqual(
+  multiSelect.events.filter(({ type }) => type === "input" || type === "change").map(({ type }) => type),
+  [],
+  "An unmodified ArrowDown in a multi-select must not emit destructive input or change events.",
+);
+
+const optgroupSelect = new StrictCspSelectElement(["Allowed", "Disabled group option", "Allowed after group"]);
+optgroupSelect.options[1].parentElement = { disabled: true, tagName: "OPTGROUP" };
+strictCspDocument.activeElement = optgroupSelect;
+await compat.debugger.sendCommand({ tabId: 1 }, "Input.dispatchKeyEvent", { type: "keyDown", key: "ArrowDown", code: "ArrowDown" });
+assert.equal(
+  optgroupSelect.selectedIndex,
+  2,
+  "Keyboard select navigation must skip an option disabled through its optgroup.",
+);
+
+strictCspChildFrameScrolls.length = 0;
+strictCspFrameHit = { left: 10, ownerIndex: 0, resolvedFrameUrl: "https://child.test/", sameUrlOwnerIndex: 0, top: 10 };
+const childScrollOperationStart = cspSafeOperations.length;
+await compat.debugger.sendCommand({ tabId: 1 }, "Input.synthesizeScrollGesture", { x: 30, y: 40, xDistance: 0, yDistance: -120 });
+assert.equal(
+  cspSafeOperations.slice(childScrollOperationStart).find(({ operation }) => operation === "synthesizeScroll")?.target.frameIds?.[0],
+  7,
+  "A synthesized scroll whose hit target is inside a child frame must be routed to that child frame.",
+);
+assert.equal(strictCspChildFrameScrolls.length, 1, "The child frame must receive the synthesized scroll operation.");
+assert.equal(
+  strictCspChildFrameScrolls.at(-1).x,
+  20,
+  "A child-frame synthesized scroll must translate its horizontal coordinate from the parent viewport.",
+);
+assert.equal(
+  strictCspChildFrameScrolls.at(-1).y,
+  30,
+  "A child-frame synthesized scroll must translate its vertical coordinate from the parent viewport.",
+);
+strictCspFrameHit = null;
+strictCspDocument.activeElement = strictCspInput;
+strictCspHitTarget = strictCspScroll;
+
+strictCspHitTarget = strictCspShadowHost;
+await compat.debugger.sendCommand({ tabId: 1 }, "Input.dispatchMouseEvent", { type: "mousePressed", button: "left", x: 20, y: 30 });
+await compat.debugger.sendCommand({ tabId: 1 }, "Input.dispatchMouseEvent", { type: "mouseReleased", button: "left", x: 20, y: 30 });
+assert.equal(strictCspShadowButton.clickCount, 1, "A pointer click must activate the deepest element inside an open shadow root.");
+strictCspHitTarget = strictCspInput;
 await compat.debugger.sendCommand({ tabId: 1 }, "Input.dispatchMouseEvent", { type: "mouseMoved", x: 10, y: 20 });
 const strictMouseMove = strictCspInput.events.filter(({ type }) => type === "mousemove").at(-1);
 assert.equal(strictMouseMove.buttons, 0, "A plain mouse move must not imply that the left button is pressed.");
 
+const untrustedPlaywrightHelper = {
+  __codexFirefoxPlaywrightHelperBrand: "codex-firefox-playwright-helper-v1",
+  parseSelector() { throw new Error("Page-controlled helper must never be trusted."); },
+  querySelectorAll() { return [strictCspInput]; },
+};
+strictCspPage.__codexPlaywrightInjected = untrustedPlaywrightHelper;
 const playwrightInstall = await compat.debugger.sendCommand({ tabId: 1 }, "Runtime.evaluate", {
   expression: `(() => {
     if (!window.__codexPlaywrightInjected) {
@@ -536,6 +797,161 @@ const playwrightInstall = await compat.debugger.sendCommand({ tabId: 1 }, "Runti
   returnByValue: false,
 });
 assert.equal(playwrightInstall.result.type, "undefined", "The optional Playwright helper install must not use eval under strict CSP.");
+const trustedPlaywrightHelper = strictCspPage.__codexPlaywrightInjected;
+assert.notStrictEqual(trustedPlaywrightHelper, untrustedPlaywrightHelper, "The bridge must replace an untrusted truthy page-defined Playwright helper global.");
+assert.equal(
+  trustedPlaywrightHelper.__codexFirefoxPlaywrightHelperBrand,
+  "codex-firefox-playwright-helper-v1",
+  "The installed Firefox Playwright helper must expose its stable identifier.",
+);
+const cssMatches = trustedPlaywrightHelper.querySelectorAll(
+  trustedPlaywrightHelper.parseSelector('input[type="file"]'),
+  strictCspDocument,
+);
+assert.equal(cssMatches.length, 1, "The branded helper must support its advertised CSS selector subset.");
+assert.strictEqual(cssMatches[0], controlledUploadInput);
+const labelMatches = trustedPlaywrightHelper.querySelectorAll(
+  trustedPlaywrightHelper.parseSelector('internal:label="Controlled upload"i'),
+  strictCspDocument,
+);
+assert.equal(labelMatches.length, 1, "The branded helper must support its advertised internal:label selector subset.");
+assert.strictEqual(labelMatches[0], controlledUploadInput);
+await compat.debugger.sendCommand({ tabId: 1 }, "Runtime.evaluate", {
+  expression: `(() => {
+    if (!window.__codexPlaywrightInjected) {
+      window.__codexPlaywrightInjected = new PlaywrightInjected.InjectedScript(window, {});
+    }
+  })()`,
+  awaitPromise: true,
+  returnByValue: false,
+});
+const reinstalledPlaywrightHelper = strictCspPage.__codexPlaywrightInjected;
+assert.notStrictEqual(
+  reinstalledPlaywrightHelper,
+  trustedPlaywrightHelper,
+  "Each install must replace the page global with a fresh valid helper because the public brand is forgeable in the MAIN world.",
+);
+const reinstalledCssMatches = reinstalledPlaywrightHelper.querySelectorAll(
+  reinstalledPlaywrightHelper.parseSelector('input[type="file"]'),
+  strictCspDocument,
+);
+assert.equal(reinstalledCssMatches.length, 1, "A reinstalled helper must retain the advertised CSS selector subset.");
+assert.strictEqual(reinstalledCssMatches[0], controlledUploadInput);
+const reinstalledLabelMatches = reinstalledPlaywrightHelper.querySelectorAll(
+  reinstalledPlaywrightHelper.parseSelector('internal:label="Controlled upload"i'),
+  strictCspDocument,
+);
+assert.equal(reinstalledLabelMatches.length, 1, "A reinstalled helper must retain the advertised internal:label selector subset.");
+assert.strictEqual(reinstalledLabelMatches[0], controlledUploadInput);
+
+const caseSensitiveLabelInput = new StrictCspInputElement();
+caseSensitiveLabelInput.attributeValues.set("aria-label", "Case Sensitive Label");
+strictCspControlCandidates.push(caseSensitiveLabelInput);
+const caseInsensitiveLabelMatches = reinstalledPlaywrightHelper.querySelectorAll(
+  reinstalledPlaywrightHelper.parseSelector('internal:label="case sensitive label"i'),
+  strictCspDocument,
+);
+assert.equal(
+  caseInsensitiveLabelMatches.length,
+  1,
+  "internal:label with the i flag must compare labels case-insensitively.",
+);
+assert.strictEqual(caseInsensitiveLabelMatches[0], caseSensitiveLabelInput);
+const caseSensitiveLabelMatches = reinstalledPlaywrightHelper.querySelectorAll(
+  reinstalledPlaywrightHelper.parseSelector('internal:label="case sensitive label"s'),
+  strictCspDocument,
+);
+assert.equal(
+  caseSensitiveLabelMatches.length,
+  0,
+  "internal:label with the s flag must preserve the selector's case sensitivity.",
+);
+strictCspControlCandidates.pop();
+
+const whitespaceLabelInput = new StrictCspInputElement();
+whitespaceLabelInput.attributeValues.set("aria-label", "  Primary   Email Address  ");
+strictCspControlCandidates.push(whitespaceLabelInput);
+const normalizedSubstringMatches = reinstalledPlaywrightHelper.querySelectorAll(
+  reinstalledPlaywrightHelper.parseSelector('internal:label="email"i'),
+  strictCspDocument,
+);
+assert.equal(
+  normalizedSubstringMatches.length,
+  1,
+  "internal:label with i must match a normalized-whitespace, case-insensitive substring.",
+);
+assert.strictEqual(normalizedSubstringMatches[0], whitespaceLabelInput);
+const normalizedSensitiveExactMatches = reinstalledPlaywrightHelper.querySelectorAll(
+  reinstalledPlaywrightHelper.parseSelector('internal:label="Primary Email Address"s'),
+  strictCspDocument,
+);
+assert.equal(
+  normalizedSensitiveExactMatches.length,
+  1,
+  "internal:label with s must use normalized-whitespace exact matching.",
+);
+assert.strictEqual(normalizedSensitiveExactMatches[0], whitespaceLabelInput);
+const normalizedSensitiveSubstringMatches = reinstalledPlaywrightHelper.querySelectorAll(
+  reinstalledPlaywrightHelper.parseSelector('internal:label="email"s'),
+  strictCspDocument,
+);
+assert.equal(
+  normalizedSensitiveSubstringMatches.length,
+  0,
+  "internal:label with s must not change exact matching into substring matching.",
+);
+const wrongCaseSensitiveExactMatches = reinstalledPlaywrightHelper.querySelectorAll(
+  reinstalledPlaywrightHelper.parseSelector('internal:label="primary email address"s'),
+  strictCspDocument,
+);
+assert.equal(
+  wrongCaseSensitiveExactMatches.length,
+  0,
+  "internal:label with s must preserve case sensitivity after normalizing whitespace.",
+);
+strictCspControlCandidates.pop();
+
+const dynamicEvaluationAttemptsBeforeHelperFallback = strictCspDynamicEvaluationAttempts;
+await assert.rejects(
+  compat.debugger.sendCommand({ tabId: 1 }, "Runtime.evaluate", {
+    expression: unrecognizedPlaywrightHelperExpression,
+    returnByValue: true,
+  }),
+  /strict-CSP/u,
+  "The first unsupported Playwright helper evaluation must report the strict-CSP compatibility limit.",
+);
+assert.equal(
+  strictCspDynamicEvaluationAttempts,
+  dynamicEvaluationAttemptsBeforeHelperFallback + 1,
+  "The first unsupported Playwright helper evaluation may make one authoritative dynamic-evaluation attempt to detect strict CSP.",
+);
+await assert.rejects(
+  compat.debugger.sendCommand({ tabId: 1 }, "Runtime.evaluate", {
+    expression: unrecognizedPlaywrightHelperExpression,
+    returnByValue: true,
+  }),
+  /strict-CSP/u,
+  "A repeated unsupported Playwright helper evaluation must use the cached strict-CSP result.",
+);
+assert.equal(
+  strictCspDynamicEvaluationAttempts,
+  dynamicEvaluationAttemptsBeforeHelperFallback + 1,
+  "A cached strict-CSP result must prevent repeated CSP-blocked dynamic evaluations in the same frame.",
+);
+
+// This covers direct debugger DOM-domain resolution only. It does not exercise
+// the installed client's live Playwright locator pipeline.
+const locatorDocument = await compat.debugger.sendCommand({ tabId: 1 }, "DOM.getDocument", { depth: 2 });
+assert.equal(locatorDocument.root.nodeId, 1, "Direct DOM.getDocument must expose a top-level document root.");
+const locatorMatch = await compat.debugger.sendCommand({ tabId: 1 }, "DOM.querySelector", {
+  nodeId: locatorDocument.root.nodeId,
+  selector: 'input[type="file"]',
+});
+assert.notEqual(locatorMatch.nodeId, 0, "Direct DOM.querySelector must resolve the controlled file input.");
+const locatorNode = await compat.debugger.sendCommand({ tabId: 1 }, "DOM.describeNode", { nodeId: locatorMatch.nodeId });
+assert.deepEqual(locatorNode.node.attributes, ["type", "file", "aria-label", "Controlled upload"]);
+const locatorObject = await compat.debugger.sendCommand({ tabId: 1 }, "DOM.resolveNode", { nodeId: locatorMatch.nodeId });
+assert.equal(locatorObject.object.subtype, "node", "The directly resolved DOM node must remain usable through the runtime object bridge.");
 
 const playwrightSnapshot = await compat.debugger.sendCommand({ tabId: 1 }, "Runtime.evaluate", {
   expression: `(() => {
@@ -616,7 +1032,55 @@ await compat.debugger.sendCommand({ tabId: 1 }, "Runtime.evaluate", {
 });
 await compat.debugger.sendCommand({ tabId: 1 }, "Page.removeScriptToEvaluateOnNewDocument", { identifier: clipboardInit.identifier });
 await compat.debugger.sendCommand({ tabId: 1 }, "Runtime.removeBinding", { name: browserUseBindingName });
+const childFrameDebuggee = { tabId: 1, sessionId: "firefox-session-1-7" };
+const childFrameCspAttemptStart = strictCspDynamicEvaluationAttempts;
+await assert.rejects(
+  compat.debugger.sendCommand(childFrameDebuggee, "Runtime.evaluate", {
+    expression: unrecognizedPlaywrightHelperExpression,
+    returnByValue: true,
+  }),
+  /strict-CSP/u,
+  "The child frame must record its own strict-CSP helper evaluation result.",
+);
+assert.equal(
+  strictCspDynamicEvaluationAttempts,
+  childFrameCspAttemptStart + 1,
+  "The first child-frame helper evaluation must make one strict-CSP detection attempt.",
+);
+browser.webNavigation.onCommitted.emit({
+  tabId: 1,
+  frameId: 7,
+  parentFrameId: 0,
+  url: "https://child-next.test/",
+});
+await new Promise((resolve) => setTimeout(resolve, 0));
 strictCspEnabled = false;
+await assert.rejects(
+  compat.debugger.sendCommand({ tabId: 1 }, "Runtime.evaluate", {
+    expression: unrecognizedPlaywrightHelperExpression,
+    returnByValue: true,
+  }),
+  /strict-CSP/u,
+  "A child-frame navigation must not clear the cached strict-CSP result for a different frame.",
+);
+const childFrameAfterNavigation = await compat.debugger.sendCommand(
+  childFrameDebuggee,
+  "Runtime.evaluate",
+  {
+    expression: unrecognizedPlaywrightHelperExpression,
+    returnByValue: true,
+  },
+);
+assert.equal(
+  childFrameAfterNavigation.result.value,
+  "child-evaluation",
+  "A committed child-frame navigation must clear that frame's strict-CSP cache for the new document.",
+);
+assert.equal(
+  strictCspDynamicEvaluationAttempts,
+  childFrameCspAttemptStart + 1,
+  "The child frame's fresh non-CSP document must dynamically evaluate without another CSP detection attempt.",
+);
 
 await compat.debugger.sendCommand({ tabId: 1 }, "Input.dispatchKeyEvent", { type: "rawKeyDown", key: "Control", code: "ControlLeft", text: "" });
 assert.equal(cspSafeOperations.at(-1).operation, "dispatchKeyboard", "Keyboard input must use the CSP-safe page-operation path.");
