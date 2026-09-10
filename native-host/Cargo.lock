@@ -34,6 +34,7 @@ name = "codex-firefox-bridge"
 version = "1.4.11"
 dependencies = [
  "base64",
+ "libc",
  "regex",
  "serde_json",
  "tempfile",
