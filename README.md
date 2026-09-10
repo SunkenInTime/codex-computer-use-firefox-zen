@@ -183,7 +183,7 @@ Read [PRIVACY.md](PRIVACY.md) for the data-handling disclosure. The native adapt
 ### Isolated lifecycle smoke test
 
 ```sh
-FIREFOX_BINARY=/path/to/firefox node tests/test-firefox-lifecycle-live.mjs
+FIREFOX_BINARY=/path/to/firefox npm run test:live
 # macOS Zen: /Applications/Zen.app/Contents/MacOS/zen
 ```
 

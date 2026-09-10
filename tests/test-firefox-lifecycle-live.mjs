@@ -3,13 +3,15 @@ import path from "node:path";
 import http from "node:http";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const firefoxBinary = process.env.FIREFOX_BINARY;
 if (!firefoxBinary)
   throw new Error(
     "Set FIREFOX_BINARY to a Firefox or Zen executable. This test uses a disposable headless profile.",
   );
+if (!process.env.npm_execpath)
+  throw new Error("Run this test with npm run test:live.");
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "firefox-lifecycle-test-"));
 fs.copyFileSync(
   path.join(root, "extension/firefox-compat.js"),
@@ -61,6 +63,7 @@ const debuggee={tabId:target.id};const events=[];
 chrome.debugger.onEvent.addListener((source,method,params)=>{if(source.tabId===target.id)events.push({method,params});});
 await chrome.debugger.attach(debuggee);
 await chrome.debugger.sendCommand(debuggee,'Page.enable',{});
+await chrome.debugger.sendCommand(debuggee,'Network.enable',{});
 await chrome.debugger.sendCommand(debuggee,'Page.setLifecycleEventsEnabled',{enabled:true});
 await browser.tabs.update(target.id,{url:${JSON.stringify(url + "/next")}});
 for(let i=0;i<100&&!events.some(e=>e.method==='Page.lifecycleEvent'&&e.params.name==='load');i++)await new Promise(r=>setTimeout(r,100));
@@ -72,13 +75,19 @@ const lastLoad=lifecycle.findLast(e=>e.params.name==='load');
 if(new Set(lifecycle.map(e=>e.params.loaderId)).size!==1)throw Error('Mixed navigation events');
 const tree=await chrome.debugger.sendCommand(debuggee,'Page.getFrameTree',{});
 if(tree.frameTree.frame.loaderId!==lastLoad.params.loaderId)throw Error('Loader mismatch');
+const documentEvents=events.filter(e=>['Network.requestWillBeSent','Network.responseReceived'].includes(e.method)&&e.params.type==='Document'&&e.params.requestId.startsWith('firefox-request-'));
+if(!documentEvents.length||documentEvents.some(e=>e.params.loaderId!==lastLoad.params.loaderId))throw Error('Network loader mismatch');
 await fetch(${JSON.stringify(url + "/result")},{method:'POST',body:JSON.stringify({ok:true,backgroundTabPreserved:true,lifecycle:lifecycle.map(e=>e.params.name),loaderId:lastLoad.params.loaderId})});
 }catch(e){await fetch(${JSON.stringify(url + "/result")},{method:'POST',body:JSON.stringify({ok:false,error:String(e)+' '+e.stack})});}})();`,
 );
 const child = spawn(
-  "npx",
+  process.execPath,
   [
+    process.env.npm_execpath,
+    "exec",
     "--yes",
+    "--package=web-ext",
+    "--",
     "web-ext",
     "run",
     "--source-dir",
@@ -108,7 +117,8 @@ const timeout = setTimeout(
 const outcome = await result;
 clearTimeout(timeout);
 try {
-  if (process.platform === "win32") child.kill("SIGTERM");
+  if (process.platform === "win32")
+    spawnSync("taskkill", ["/pid", String(child.pid), "/t", "/f"]);
   else process.kill(-child.pid, "SIGTERM");
 } catch (error) {
   if (error.code !== "ESRCH") throw error;

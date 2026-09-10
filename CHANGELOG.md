@@ -10,6 +10,8 @@ Git tag.
   the unsupported-command error that prevented direct Firefox/Zen control.
 - Translate navigation init, DOMContentLoaded, and load notifications into
   session-scoped lifecycle events with consistent frame loader IDs.
+- Keep navigation, lifecycle, request, redirect, and response loader IDs aligned,
+  retaining the original document identity for late network responses.
 - Cover background-tab attachment, lifecycle toggling, and detach cleanup in
   the protocol regression suite. Attachment does not activate the target tab.
 

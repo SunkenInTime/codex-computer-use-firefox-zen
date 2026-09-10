@@ -9,7 +9,7 @@ No new add-on permissions or upstream bundle changes are included.
 
 - `npm test`: passed, including the regression that fails against 1.4.10.
 - `npm test --prefix npm`: passed on macOS (Linux-only install tests run in CI).
-- `FIREFOX_BINARY=/Applications/Zen.app/Contents/MacOS/zen node tests/test-firefox-lifecycle-live.mjs`:
+- `FIREFOX_BINARY=/Applications/Zen.app/Contents/MacOS/zen npm run test:live`:
   passed using a disposable headless profile, with foreground-tab preservation.
 - `npx --yes web-ext lint --source-dir extension --no-input`: zero errors,
   zero notices, 72 warnings from the existing distribution.
