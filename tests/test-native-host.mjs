@@ -63,7 +63,10 @@ function rustWindowsExtendedLengthPath(canonicalPath) {
 }
 
 function rustCanonicalPath(file) {
-  const canonicalPath = fs.realpathSync(file);
+  // The .native realpath variant calls GetFinalPathNameByHandle on Windows,
+  // which expands 8.3 short names and returns the extended-length \\?\ prefix —
+  // matching what Rust's fs::canonicalize reports for the same file.
+  const canonicalPath = isWindows ? fs.realpathSync.native(file) : fs.realpathSync(file);
   return isWindows ? rustWindowsExtendedLengthPath(canonicalPath) : canonicalPath;
 }
 
@@ -159,6 +162,7 @@ function runBridge(proxy, fixture, mode, input = Buffer.alloc(0), environment = 
     });
     const stdout = [];
     const stderr = [];
+    let exitedAt = null;
     let outputBytes = 0;
     const outputMaximum = (2 * outputLimit) + 4096;
     let timedOut = false;
@@ -176,14 +180,20 @@ function runBridge(proxy, fixture, mode, input = Buffer.alloc(0), environment = 
       stdout.push(chunk);
     });
     child.stderr.on("data", (chunk) => stderr.push(chunk));
+    child.once("exit", () => {
+      exitedAt = Date.now();
+    });
     child.once("error", (error) => {
       clearTimeout(timer);
       reject(error);
     });
     child.once("close", (status, signal) => {
       clearTimeout(timer);
+      // Duration tracks the bridge's own termination ("exit"), not "close": on
+      // Windows a descendant can hold inherited copies of the std handles and
+      // keep the pipes open long after the bridge process has exited.
       resolve({
-        durationMilliseconds: Date.now() - startedAt,
+        durationMilliseconds: (exitedAt ?? Date.now()) - startedAt,
         signal,
         status,
         stderr: Buffer.concat(stderr),
@@ -416,5 +426,8 @@ try {
 
   console.log(JSON.stringify({ ok: true, nativeMessaging: true, selectedCase: selectedCase ?? "all" }, null, 2));
 } finally {
-  fs.rmSync(temp, { recursive: true, force: true });
+  // A failed case can leave the fixture or its descendants running with the
+  // temp-dir image locked on Windows; retry briefly rather than masking the
+  // real assertion error with EPERM.
+  fs.rmSync(temp, { recursive: true, force: true, maxRetries: 12, retryDelay: 500 });
 }
