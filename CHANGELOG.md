@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.4.12 - 2026-09-10
 
 - Fix strict-CSP failures in computer-use element clicks by running the AX hit-test and remote-object cleanup without page eval.
 - Run the real Firefox click-and-type regression in pull-request CI, including background-tab preservation.
