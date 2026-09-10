@@ -179,3 +179,15 @@ npm run version:set -- MAJOR.MINOR.PATCH
 Read [PRIVACY.md](PRIVACY.md) for the data-handling disclosure. The native adapter pins its relay origin to the official OpenAI extension ID and rejects unrelated messages.
 
 `extension/codex-sidepanel` and `extension/background.js` are OpenAI's packaged distribution, not a clean-room source reimplementation. Those upstream assets remain subject to OpenAI's applicable terms. The compatibility code in this repository is provided for review and development; no additional license is granted for the bundled upstream assets.
+
+### Isolated lifecycle smoke test
+
+```sh
+FIREFOX_BINARY=/path/to/firefox node tests/test-firefox-lifecycle-live.mjs
+# macOS Zen: /Applications/Zen.app/Contents/MacOS/zen
+```
+
+This optional test uses `web-ext` and a disposable headless profile, never your
+signed-in profile. It exercises the real compatibility layer against local
+HTTP fixtures and verifies lifecycle delivery and foreground-tab preservation.
+It does not exercise the signed-in Codex native transport.

@@ -221,8 +221,8 @@ jobs:
           files: release/*
 
   publish-npm:
-    if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
-    needs: npm-package
+    if: github.ref_type == 'tag'
+    needs: [npm-package, publish]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

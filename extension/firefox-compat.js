@@ -419,6 +419,39 @@
   };
 
   const debuggerAttachedTabs = new Set();
+  const lifecycleEnabledFrames = new Set();
+  const loaderIdsByFrame = new Map();
+  let nextLoaderId = 1;
+
+  function loaderIdForFrame(tabId, frameId) {
+    const key = frameKey(tabId, frameId);
+    if (!loaderIdsByFrame.has(key)) {
+      loaderIdsByFrame.set(key, `firefox-loader-${tabId}-${frameId}-${nextLoaderId++}`);
+    }
+    return loaderIdsByFrame.get(key);
+  }
+
+  function clearLifecycleState(tabId) {
+    for (const key of loaderIdsByFrame.keys()) {
+      if (key.startsWith(`${tabId}:`)) loaderIdsByFrame.delete(key);
+    }
+    for (const key of lifecycleEnabledFrames) {
+      if (key.startsWith(`${tabId}:`)) lifecycleEnabledFrames.delete(key);
+    }
+  }
+
+  function emitLifecycleEvent(tabId, frameId, name) {
+    const sessionId = frameId === 0 ? null : (sessionIdByFrame.get(frameKey(tabId, frameId)) ?? null);
+    // Frames without a separate target session belong to the root page session.
+    const enabledFrame = sessionId == null ? 0 : frameId;
+    if (!lifecycleEnabledFrames.has(frameKey(tabId, enabledFrame))) return;
+    emitDebuggerEvent(tabId, "Page.lifecycleEvent", {
+      frameId: cdpFrameId(tabId, frameId),
+      loaderId: loaderIdForFrame(tabId, frameId),
+      name,
+      timestamp: performance.now() / 1000,
+    }, sessionId);
+  }
   const debuggerOnEvent = new CompatEvent();
   const debuggerOnDetach = new CompatEvent();
   const initScriptsByTab = new Map();
@@ -2129,7 +2162,7 @@
       const url = entry.url || (entry.frameId === 0 ? topUrl : "about:blank");
       const frame = {
         id: cdpFrameId(tabId, entry.frameId),
-        loaderId: `firefox-loader-${tabId}-${entry.frameId}`,
+        loaderId: loaderIdForFrame(tabId, entry.frameId),
         url,
         name: frameMetadata.name ?? "",
         domainAndRegistry: "",
@@ -3259,6 +3292,7 @@
       case "Target.detachFromTarget": {
         const session = sessionFrameById.get(params.sessionId);
         if (session?.tabId === tabId) {
+          lifecycleEnabledFrames.delete(frameKey(tabId, session.frameId));
           sessionFrameById.delete(params.sessionId);
           sessionIdByFrame.delete(frameKey(tabId, session.frameId));
           emitDebuggerEvent(tabId, "Target.detachedFromTarget", { sessionId: params.sessionId, targetId: frameTargetId(tabId, session.frameId) });
@@ -3336,6 +3370,10 @@
         );
         return {};
       }
+      case "Page.setLifecycleEventsEnabled":
+        if (params.enabled === true) lifecycleEnabledFrames.add(frameKey(tabId, frameId));
+        else lifecycleEnabledFrames.delete(frameKey(tabId, frameId));
+        return {};
       case "Page.enable":
       case "Page.disable":
       case "Page.setAdBlockingEnabled":
@@ -3877,6 +3915,7 @@
     async detach(debuggee) {
       const tabId = resolveTabId(debuggee);
       const wasAttached = debuggerAttachedTabs.delete(tabId);
+      clearLifecycleState(tabId);
       await clearViewportOverride(tabId);
       emulationStateByTab.delete(tabId);
       await applyEmulationState(tabId).catch(() => {});
@@ -4114,7 +4153,7 @@
       emitDebuggerEvent(tabId, "Page.frameNavigated", {
         frame: {
           id: cdpFrameId(tabId, 0),
-          loaderId: `firefox-loader-${tabId}-0-${Date.now()}`,
+          loaderId: loaderIdForFrame(tabId, 0),
           url: changeInfo.url,
           securityOrigin: (() => {
             try { return new URL(changeInfo.url).origin; } catch { return "null"; }
@@ -4136,6 +4175,7 @@
   });
 
   firefox.tabs.onRemoved.addListener((tabId) => {
+    clearLifecycleState(tabId);
     navigationStateByTab.delete(tabId);
     initScriptsByTab.delete(tabId);
     bindingNamesByTab.delete(tabId);
@@ -4182,6 +4222,8 @@
     const { tabId, frameId } = details;
     if (!debuggerAttachedTabs.has(tabId)) return;
     const sessionId = frameId === 0 ? null : (sessionIdByFrame.get(frameKey(tabId, frameId)) ?? null);
+    loaderIdsByFrame.set(frameKey(tabId, frameId), `firefox-loader-${tabId}-${frameId}-${nextLoaderId++}`);
+    emitLifecycleEvent(tabId, frameId, "init");
     emitDebuggerEvent(tabId, "Runtime.executionContextDestroyed", {
       executionContextId: executionContextIdForFrame(frameId),
       executionContextUniqueId: `firefox-context-${tabId}-${frameId}`,
@@ -4196,7 +4238,7 @@
       frame: {
         id: cdpFrameId(tabId, frameId),
         ...(frameId === 0 ? {} : { parentId: cdpFrameId(tabId, details.parentFrameId) }),
-        loaderId: `firefox-loader-${tabId}-${frameId}-${Date.now()}`,
+        loaderId: loaderIdForFrame(tabId, frameId),
         url: details.url,
         securityOrigin: (() => { try { return new URL(details.url).origin; } catch { return "null"; } })(),
         mimeType: "text/html",
@@ -4211,8 +4253,15 @@
     })();
   });
 
+  firefox.webNavigation.onDOMContentLoaded.addListener(({ tabId, frameId }) => {
+    if (!debuggerAttachedTabs.has(tabId)) return;
+    emitLifecycleEvent(tabId, frameId, "DOMContentLoaded");
+  });
+
   firefox.webNavigation.onCompleted.addListener(({ tabId, frameId }) => {
-    if (!debuggerAttachedTabs.has(tabId) || frameId === 0) return;
+    if (!debuggerAttachedTabs.has(tabId)) return;
+    emitLifecycleEvent(tabId, frameId, "load");
+    if (frameId === 0) return;
     const sessionId = sessionIdByFrame.get(frameKey(tabId, frameId)) ?? null;
     emitDebuggerEvent(tabId, "Page.frameStoppedLoading", { frameId: cdpFrameId(tabId, frameId) }, sessionId);
   });

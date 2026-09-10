@@ -69,3 +69,21 @@ Developer ID-sign, notarize, and staple the macOS package when the repository
 signing secrets are configured. Unsigned workflow-dispatch artifacts remain
 suitable for development testing but should not be presented as production
 installers.
+
+## 1.4.11 lifecycle compatibility
+
+`Page.setLifecycleEventsEnabled` accepts enable/disable requests without
+activating the tab. Firefox webNavigation notifications provide `init`,
+`DOMContentLoaded`, and `load` events, with a loader ID shared by the committed
+frame and frame tree. Subscriptions are cleared on detach and tab close.
+Network-idle lifecycle events and replay of events predating subscription are
+not synthesized. Screenshot fallbacks elsewhere can still briefly activate a
+tab; this change only makes attachment and lifecycle subscription passive.
+
+Regression: the updated protocol test fails against 1.4.10 with the exact
+`Page.setLifecycleEventsEnabled` error and passes against the patched source.
+
+The isolated headless Zen smoke test passed on macOS on 2026-09-10: real
+WebExtension attach, lifecycle notifications, matching loader IDs, and unchanged
+foreground tab. The signed-in Codex transport has not been retested in the
+user's profile; the installed add-on remains untouched.
