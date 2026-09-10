@@ -59,8 +59,13 @@ fs.writeFileSync(
   path.join(dir, "test.js"),
   `(async()=>{try{
 const target=await browser.tabs.create({url:${JSON.stringify(url)},active:true});
-for(let i=0;i<300&&(await browser.tabs.get(target.id)).status!=='complete';i++)await new Promise(r=>setTimeout(r,100));
-if((await browser.tabs.get(target.id)).status!=='complete')throw Error('Initial fixture did not load: '+JSON.stringify(await browser.tabs.get(target.id)));
+let initialLoaded=false;
+for(let i=0;i<300;i++){
+ const tab=await browser.tabs.get(target.id);
+ if(tab.status==='complete'&&tab.url===${JSON.stringify(url + "/")}){initialLoaded=true;break;}
+ await new Promise(r=>setTimeout(r,100));
+}
+if(!initialLoaded)throw Error('Initial fixture did not load: '+JSON.stringify(await browser.tabs.get(target.id)));
 const foreground=await browser.tabs.create({url:${JSON.stringify(url + "/foreground")},active:true});
 const activations=[];browser.tabs.onActivated.addListener(info=>activations.push(info.tabId));
 const debuggee={tabId:target.id};const events=[];
