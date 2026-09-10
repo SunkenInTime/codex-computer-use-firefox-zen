@@ -1007,6 +1007,149 @@
           }],
         };
       }
+      // Static equivalent of the Browser Use AX hit-test callback. The callback
+      // must run through executeScript, never eval in the page's CSP realm.
+      case "accessibilityHitTest": {
+        function hitTestAccessibilityNode() {
+          let e = this instanceof Element ? this : this.parentElement;
+          if (e == null)
+            throw new Error("Cannot hit-test a detached accessibility element");
+          let t = e.getClientRects()[0] ?? e.getBoundingClientRect();
+          if (this instanceof Text) {
+            let A = document.createRange();
+            (A.selectNode(this),
+              (t = A.getClientRects()[0] ?? A.getBoundingClientRect()));
+          }
+          let r = { x: t.left + t.width / 2, y: t.top + t.height / 2 },
+            n = e.ownerDocument.defaultView;
+          if (n == null)
+            throw new Error(
+              "Cannot hit-test an accessibility element without a viewport",
+            );
+          let o = n.visualViewport,
+            i = o?.offsetLeft ?? 0,
+            s = o?.offsetTop ?? 0,
+            a = Math.max(t.left, i),
+            l = Math.min(t.right, i + (o?.width ?? n.innerWidth)),
+            c = Math.max(t.top, s),
+            p = Math.min(t.bottom, s + (o?.height ?? n.innerHeight)),
+            m = l > a && p > c ? { x: (a + l) / 2, y: (c + p) / 2 } : r,
+            h =
+              e instanceof HTMLInputElement ||
+              e instanceof HTMLButtonElement ||
+              e instanceof HTMLSelectElement ||
+              e instanceof HTMLTextAreaElement
+                ? e
+                : void 0,
+            y = [e, ...Array.from(h?.labels ?? [])],
+            w = [
+              "button",
+              "a[href]",
+              "input",
+              "select",
+              "textarea",
+              '[role="button"]',
+              '[role="checkbox"]',
+              '[role="combobox"]',
+              '[role="link"]',
+              '[role="listbox"]',
+              '[role="menuitem"]',
+              '[role="option"]',
+              '[role="radio"]',
+              '[role="slider"]',
+              '[role="spinbutton"]',
+              '[role="switch"]',
+              '[role="tab"]',
+              '[role="textbox"]',
+              '[tabindex]:not([tabindex="-1"])',
+            ].join(","),
+            x = (A, L = m.x, $ = m.y) => {
+              let U = A.getRootNode(),
+                X =
+                  U instanceof ShadowRoot
+                    ? U.elementFromPoint(L, $)
+                    : A.ownerDocument.elementFromPoint(L, $);
+              for (; X?.shadowRoot != null;) {
+                let oe = X.shadowRoot.elementFromPoint(L, $);
+                if (oe == null || oe === X) break;
+                X = oe;
+              }
+              return X;
+            },
+            S = (A, L, $ = !1) => {
+              let U = !1;
+              for (let X = L; X != null;) {
+                if (X === A) return !$ || U;
+                let oe =
+                  X instanceof Element || X instanceof Text ? X.assignedSlot : null;
+                if (oe != null) ((U = !0), (X = oe));
+                else if (X.parentNode != null) X = X.parentNode;
+                else {
+                  let me = X.getRootNode(),
+                    se = me instanceof ShadowRoot ? me.host : null;
+                  ((U ||= se != null), (X = se));
+                }
+              }
+              return !1;
+            },
+            D = (A, L = m.x, $ = m.y) => {
+              let U = x(A, L, $);
+              if (U == null) return !1;
+              let X = U.closest(w),
+                oe = (A instanceof HTMLLabelElement ? A.control : null) ?? A.closest(w);
+              if (oe != null && X != null && X !== oe && !S(X, oe)) return !1;
+              if (S(A, U) || S(U, A, !0)) return !0;
+              let me = A.closest("label")?.control;
+              return (me != null &&
+                (S(U, me) ||
+                  S(me, U) ||
+                  (A === e &&
+                    U.parentElement === me.parentElement &&
+                    (X == null || S(X, me))))) ||
+                (oe != null && oe === X)
+                ? !0
+                : getComputedStyle(A).pointerEvents === "none" && S(U, A);
+            },
+            T = y.some((A) => D(A));
+          return {
+            fallbackPoint:
+              (T
+                ? null
+                : y
+                    .slice(1)
+                    .flatMap((A) =>
+                      Array.from(A.getClientRects()).map((L) => ({
+                        candidate: A,
+                        point: { x: L.left + L.width / 2, y: L.top + L.height / 2 },
+                        size: { height: L.height, width: L.width },
+                      })),
+                    )
+                    .find(
+                      ({ candidate: A, point: L, size: $ }) =>
+                        $.width > 1 && $.height > 1 && D(A, L.x, L.y),
+                    )?.point) ?? null,
+            hitTag: x(e)?.tagName ?? null,
+            hitsTarget: T,
+            point: m,
+            viewportSize: { height: n.innerHeight, width: n.innerWidth },
+          };
+        }
+        return { result: { type: "object", value: hitTestAccessibilityNode.call(nodeFromPayload()) } };
+      }
+      case "releaseObject": {
+        state.objects.delete(payload.objectId);
+        state.objectGroups.delete(payload.objectId);
+        return {};
+      }
+      case "releaseObjectGroup": {
+        for (const [id, group] of state.objectGroups) {
+          if (group === payload.objectGroup) {
+            state.objects.delete(id);
+            state.objectGroups.delete(id);
+          }
+        }
+        return {};
+      }
       case "boxModel": {
         const node = nodeFromPayload();
         if (!(node instanceof Element)) throw new Error("DOM element not found");
@@ -2075,6 +2218,17 @@
 
   async function callRuntimeFunction(tabId, params, frameId = 0) {
     const declaration = stripSourceUrl(params.functionDeclaration ?? "function () {}");
+    // Browser Use's AX click first calls a read-only, node-bound hit test.
+    // Recognize that helper before the generic dynamic-function fallback.
+    if (params.objectId && params.returnByValue === true
+      && declaration.startsWith("function (argument) { const __name = (target) => target; return (")
+      && declaration.endsWith(").call(this, argument); }")
+      && declaration.includes("Cannot hit-test a detached accessibility element")
+      && declaration.includes("Cannot hit-test an accessibility element without a viewport")
+      && declaration.includes("fallbackPoint:") && declaration.includes("hitsTarget:")
+      && declaration.includes("viewportSize:")) {
+      return executeCspSafePageOperation(tabId, "accessibilityHitTest", { objectId: params.objectId }, { frameId });
+    }
     const argumentsJson = JSON.stringify(params.arguments ?? []);
     const returnByValue = params.returnByValue === true;
     const awaitPromise = params.awaitPromise === true;
@@ -3529,19 +3683,9 @@
       case "Runtime.runIfWaitingForDebugger":
         return {};
       case "Runtime.releaseObject":
-        await executeUserScript(
-          tabId,
-          operationScript(`__state.objects.delete(${JSON.stringify(params.objectId)}); __state.objectGroups.delete(${JSON.stringify(params.objectId)}); return {};`),
-          { frameId },
-        );
-        return {};
+        return executeCspSafePageOperation(tabId, "releaseObject", { objectId: params.objectId }, { frameId });
       case "Runtime.releaseObjectGroup":
-        await executeUserScript(
-          tabId,
-          operationScript(`for (const [id, group] of __state.objectGroups) { if (group === ${JSON.stringify(params.objectGroup)}) { __state.objectGroups.delete(id); __state.objects.delete(id); } } return {};`),
-          { frameId },
-        );
-        return {};
+        return executeCspSafePageOperation(tabId, "releaseObjectGroup", { objectGroup: params.objectGroup }, { frameId });
       case "Runtime.addBinding": {
         const names = bindingNamesByTab.get(tabId) ?? new Set();
         names.add(params.name);

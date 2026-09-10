@@ -32,3 +32,18 @@ jobs:
         with:
           name: release-candidate
           path: dist/*
+
+  live-firefox:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: browser-actions/setup-firefox@v1
+        id: firefox
+      - name: Real Firefox strict-CSP click, type, and lifecycle regression
+        env:
+          FIREFOX_BINARY: ${{ steps.firefox.outputs.firefox-path }}
+        run: npm run test:live

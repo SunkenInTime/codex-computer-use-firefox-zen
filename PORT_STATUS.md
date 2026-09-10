@@ -87,3 +87,14 @@ The isolated headless Zen smoke test passed on macOS on 2026-09-10: real
 WebExtension attach, lifecycle notifications, matching loader IDs, and unchanged
 foreground tab. The signed-in Codex transport has not been retested in the
 user's profile; the installed add-on remains untouched.
+
+## Strict-CSP computer-use click follow-up
+
+A live Devin test exposed an uncovered Runtime.callFunctionOn path: AX element
+clicks run a node-bound hit test before dispatching input. That helper and runtime
+object cleanup now use static scripting.executeScript operations. No site CSP is
+changed. The actual Codex computer-use connection clicked, typed into, and cleared
+a strict-CSP fixture in an isolated Zen profile. The live Firefox regression runs
+in PR CI and reproduces the original eval-blocked error with the 1.4.11 adapter.
+This change addresses AX element clicks; arbitrary dynamic Runtime functions and
+unsupported Playwright locator helpers remain outside this static adapter path.

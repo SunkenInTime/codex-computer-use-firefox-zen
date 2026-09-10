@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Fix strict-CSP failures in computer-use element clicks by running the AX hit-test and remote-object cleanup without page eval.
+- Run the real Firefox click-and-type regression in pull-request CI, including background-tab preservation.
+
 This project follows semantic versioning. The Firefox add-on and native companion
 always share one version and are released from a matching `vMAJOR.MINOR.PATCH`
 Git tag.

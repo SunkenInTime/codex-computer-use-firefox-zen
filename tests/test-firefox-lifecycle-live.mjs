@@ -14,9 +14,10 @@ if (!process.env.npm_execpath)
   throw new Error("Run this test with npm run test:live.");
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "firefox-lifecycle-test-"));
 fs.copyFileSync(
-  path.join(root, "extension/firefox-compat.js"),
+  process.env.FIREFOX_COMPAT_SOURCE || path.join(root, "extension/firefox-compat.js"),
   path.join(dir, "firefox-compat.js"),
 );
+const axFunctions = JSON.parse(fs.readFileSync(path.join(root, "tests/fixtures/cua-ax-functions.json"), "utf8"));
 const original = JSON.parse(
   fs.readFileSync(path.join(root, "extension/manifest.json")),
 );
@@ -44,8 +45,9 @@ const server = http.createServer((req, res) => {
     });
   } else {
     res.setHeader("content-type", "text/html");
+    res.setHeader("Content-Security-Policy", "default-src 'self'; script-src 'self'; object-src 'none'");
     res.end(
-      "<!doctype html><title>Lifecycle fixture</title><p>isolated lifecycle test</p>",
+      "<!doctype html><title>Lifecycle fixture</title><p>isolated lifecycle test</p><input aria-label='Repository search'><button>Search</button>",
     );
   }
 });
@@ -54,10 +56,10 @@ const url = `http://127.0.0.1:${server.address().port}`;
 fs.writeFileSync(
   path.join(dir, "test.js"),
   `(async()=>{try{
-const target=await browser.tabs.create({url:${JSON.stringify(url)},active:false});
-const foreground=await browser.tabs.create({url:${JSON.stringify(url + "/foreground")},active:true});
+const target=await browser.tabs.create({url:${JSON.stringify(url)},active:true});
 for(let i=0;i<100&&(await browser.tabs.get(target.id)).status!=='complete';i++)await new Promise(r=>setTimeout(r,100));
 if((await browser.tabs.get(target.id)).status!=='complete')throw Error('Initial fixture did not load');
+const foreground=await browser.tabs.create({url:${JSON.stringify(url + "/foreground")},active:true});
 const activations=[];browser.tabs.onActivated.addListener(info=>activations.push(info.tabId));
 const debuggee={tabId:target.id};const events=[];
 chrome.debugger.onEvent.addListener((source,method,params)=>{if(source.tabId===target.id)events.push({method,params});});
@@ -77,7 +79,21 @@ const tree=await chrome.debugger.sendCommand(debuggee,'Page.getFrameTree',{});
 if(tree.frameTree.frame.loaderId!==lastLoad.params.loaderId)throw Error('Loader mismatch');
 const documentEvents=events.filter(e=>['Network.requestWillBeSent','Network.responseReceived'].includes(e.method)&&e.params.type==='Document'&&e.params.requestId.startsWith('firefox-request-'));
 if(!documentEvents.length||documentEvents.some(e=>e.params.loaderId!==lastLoad.params.loaderId))throw Error('Network loader mismatch');
-await fetch(${JSON.stringify(url + "/result")},{method:'POST',body:JSON.stringify({ok:true,backgroundTabPreserved:true,lifecycle:lifecycle.map(e=>e.params.name),loaderId:lastLoad.params.loaderId})});
+const ax=await chrome.debugger.sendCommand(debuggee,'Accessibility.getFullAXTree',{});
+const input=ax.nodes.find(n=>n.name?.value==='Repository search');
+if(!input)throw Error('Search input missing from AX tree');
+const resolved=await chrome.debugger.sendCommand(debuggee,'DOM.resolveNode',{backendNodeId:input.backendDOMNodeId});
+const hit=await chrome.debugger.sendCommand(debuggee,'Runtime.callFunctionOn',{objectId:resolved.object.objectId,functionDeclaration:${JSON.stringify(axFunctions.hitTest)},arguments:[{}],returnByValue:true,userGesture:true});
+if(!hit.result.value.hitsTarget)throw Error('AX hit test did not find input');
+const point=hit.result.value.point;
+for(const type of ['mouseMoved','mousePressed','mouseReleased'])await chrome.debugger.sendCommand(debuggee,'Input.dispatchMouseEvent',{type,...point,button:type==='mouseMoved'?'none':'left',clickCount:1});
+await chrome.debugger.sendCommand(debuggee,'Input.insertText',{text:'icarus'});
+const typed=await chrome.debugger.sendCommand(debuggee,'Accessibility.getFullAXTree',{});
+if(typed.nodes.find(n=>n.name?.value==='Repository search')?.value?.value!=='icarus')throw Error('Click and type did not update input');
+await chrome.debugger.sendCommand(debuggee,'Runtime.releaseObject',{objectId:resolved.object.objectId});
+const activeAfter=(await browser.tabs.query({active:true,currentWindow:true}))[0];
+if(activeAfter.id!==foreground.id||activations.includes(target.id))throw Error('CSP click activated background tab');
+await fetch(${JSON.stringify(url + "/result")},{method:'POST',body:JSON.stringify({ok:true,backgroundTabPreserved:true,strictCspAxClickAndType:true,lifecycle:lifecycle.map(e=>e.params.name),loaderId:lastLoad.params.loaderId})});
 }catch(e){await fetch(${JSON.stringify(url + "/result")},{method:'POST',body:JSON.stringify({ok:false,error:String(e)+' '+e.stack})});}})();`,
 );
 const child = spawn(
