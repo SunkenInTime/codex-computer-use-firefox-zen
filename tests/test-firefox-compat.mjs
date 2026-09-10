@@ -190,7 +190,7 @@ const browser = {
   },
   windows: { async get() { return { id: 10, state: "normal", width: 1200, height: 800, left: 0, top: 0 }; }, async update() { return {}; } },
   webNavigation: {
-    onCommitted: new EventMock(), onCompleted: new EventMock(),
+    onCommitted: new EventMock(), onDOMContentLoaded: new EventMock(), onCompleted: new EventMock(),
     async getAllFrames() {
       return [
         { frameId: 0, parentFrameId: -1, url: "https://top.test/" },
@@ -669,5 +669,70 @@ const pauseCount = events.filter((event) => event.method === "Fetch.requestPause
 const unpausedResponse = beforeRequest({ requestId: "req-3", tabId: 1, frameId: 0, parentFrameId: -1, url: "https://top.test/intercept-again", method: "GET", type: "xmlhttprequest", timeStamp: 1200 });
 assert.equal(JSON.stringify(unpausedResponse), "{}", "Empty Fetch patterns must clear interception instead of pausing every request.");
 assert.equal(events.filter((event) => event.method === "Fetch.requestPaused").length, pauseCount);
+
+// Reproduce Codex attachment without activating the user's background target.
+await compat.debugger.detach({ tabId: 1 });
+const updatesBeforeAttach = tabUpdateCalls.length;
+targetTabActive = false;
+await compat.debugger.attach({ tabId: 1 });
+await compat.debugger.sendCommand({ tabId: 1 }, "Page.enable", {});
+await compat.debugger.sendCommand({ tabId: 1 }, "Page.setLifecycleEventsEnabled", { enabled: true });
+const lifecycleStart = events.length;
+const navigation = { tabId: 1, frameId: 0, parentFrameId: -1, url: "https://top.test/next" };
+browser.webNavigation.onCommitted.emit(navigation);
+browser.webNavigation.onDOMContentLoaded.emit(navigation);
+browser.webNavigation.onCompleted.emit(navigation);
+const lifecycle = events.slice(lifecycleStart).filter(event => event.method === "Page.lifecycleEvent");
+assert.deepEqual(lifecycle.map(event => event.params.name), ["init", "DOMContentLoaded", "load"]);
+assert.equal(new Set(lifecycle.map(event => event.params.loaderId)).size, 1);
+assert.ok(lifecycle.every(event => Number.isFinite(event.params.timestamp) && event.params.frameId === "firefox-frame-1"));
+const navigated = events.slice(lifecycleStart).find(event => event.method === "Page.frameNavigated");
+assert.equal(navigated.params.frame.loaderId, lifecycle[0].params.loaderId);
+const lifecycleTree = await compat.debugger.sendCommand({ tabId: 1 }, "Page.getFrameTree", {});
+assert.equal(lifecycleTree.frameTree.frame.loaderId, lifecycle[0].params.loaderId);
+assert.equal(tabUpdateCalls.length, updatesBeforeAttach, "Attaching and subscribing must not activate a background tab.");
+browser.webNavigation.onCommitted.emit(navigation);
+assert.notEqual(events.findLast(event => event.method === "Page.lifecycleEvent").params.loaderId, lifecycle[0].params.loaderId);
+await compat.debugger.sendCommand({ tabId: 1 }, "Page.setLifecycleEventsEnabled", { enabled: false });
+const disabledCount = events.filter(event => event.method === "Page.lifecycleEvent").length;
+browser.webNavigation.onCompleted.emit(navigation);
+assert.equal(events.filter(event => event.method === "Page.lifecycleEvent").length, disabledCount);
+await compat.debugger.sendCommand({ tabId: 1 }, "Page.setLifecycleEventsEnabled", { enabled: true });
+await compat.debugger.detach({ tabId: 1 });
+await compat.debugger.attach({ tabId: 1 });
+browser.webNavigation.onCompleted.emit(navigation);
+assert.equal(events.filter(event => event.method === "Page.lifecycleEvent").length, disabledCount, "Detach must clear lifecycle subscriptions.");
+
+const fragmentNavigation = await compat.debugger.sendCommand({ tabId: 1 }, "Page.navigate", { url: "https://top.test/#section" });
+assert.equal(fragmentNavigation.loaderId, undefined, "Fragment-only navigation must not reserve a new document loader.");
+
+// Document requests precede commit; redirects and late responses retain their loader.
+await compat.debugger.sendCommand({ tabId: 1 }, "Network.enable", {});
+await compat.debugger.sendCommand({ tabId: 1 }, "Page.setLifecycleEventsEnabled", { enabled: true });
+for (const frameId of [0, 7]) {
+  const navResult = frameId === 0
+    ? await compat.debugger.sendCommand({ tabId: 1 }, "Page.navigate", { url: "https://top.test/document" })
+    : null;
+  const request = { requestId: `document-${frameId}`, tabId: 1, frameId, parentFrameId: frameId ? 0 : -1, url: "https://top.test/document", method: "GET", type: frameId ? "sub_frame" : "main_frame", timeStamp: 2000 };
+  // Child navigation uses the frame's own target session in production; reserve
+  // only the root navigation here, then exercise child webRequest allocation.
+  beforeRequest(request);
+  const requestEvent = events.findLast(event => event.method === "Network.requestWillBeSent");
+  if (frameId === 0) assert.equal(requestEvent.params.loaderId, navResult.loaderId);
+  webRequest.onBeforeRedirect.emit({ ...request, redirectUrl: "https://top.test/redirected", statusCode: 302 });
+  assert.equal(events.findLast(event => event.method === "Network.requestWillBeSent").params.loaderId, requestEvent.params.loaderId);
+  beforeRequest({ ...request, url: "https://top.test/redirected" });
+  browser.webNavigation.onCommitted.emit({ ...request, url: "https://top.test/redirected" });
+  const committedLoader = events.findLast(event => event.method === "Page.frameNavigated").params.frame.loaderId;
+  assert.equal(committedLoader, requestEvent.params.loaderId);
+  assert.equal(events.findLast(event => event.method === "Page.lifecycleEvent").params.loaderId, committedLoader);
+  const subresource = { ...request, requestId: `resource-${frameId}`, type: "xmlhttprequest" };
+  beforeRequest(subresource);
+  assert.equal(events.findLast(event => event.method === "Network.requestWillBeSent").params.loaderId, committedLoader);
+  // A response from the old document must keep its original loader after a new navigation.
+  browser.webNavigation.onCommitted.emit({ ...request, url: "https://top.test/newer" });
+  webRequest.onHeadersReceived.emit({ ...subresource, statusCode: 200, responseHeaders: [] });
+  assert.equal(events.findLast(event => event.method === "Network.responseReceived").params.loaderId, committedLoader);
+}
 
 console.log(JSON.stringify({ ok: true, bridgeIdentity: true, toolbarSettings: true, nativeSidebarTracking: true, hostAccessPreflight: true, screenshotFallback: true, frameTree: true, childExecution: true, cspSafeInput: true, strictCspBrowserUse: true, liveNetworkEvents: true, responseBody: true, fetchInterception: true, fetchEmptyPatternClear: true }, null, 2));

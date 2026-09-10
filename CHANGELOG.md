@@ -4,6 +4,19 @@ This project follows semantic versioning. The Firefox add-on and native companio
 always share one version and are released from a matching `vMAJOR.MINOR.PATCH`
 Git tag.
 
+## 1.4.11 - Unreleased
+
+- Automate Firefox Add-ons submission after tagged npm releases, with a read-only AMO authentication check and matching review-source upload.
+
+- Support `Page.setLifecycleEventsEnabled` during Codex tab attachment, fixing
+  the unsupported-command error that prevented direct Firefox/Zen control.
+- Translate navigation init, DOMContentLoaded, and load notifications into
+  session-scoped lifecycle events with consistent frame loader IDs.
+- Keep navigation, lifecycle, request, redirect, and response loader IDs aligned,
+  retaining the original document identity for late network responses.
+- Cover background-tab attachment, lifecycle toggling, and detach cleanup in
+  the protocol regression suite. Attachment does not activate the target tab.
+
 ## 1.4.10 - 2026-08-15
 
 - Completed the strict-CSP Browser Use path for `playwright.domSnapshot()`,
