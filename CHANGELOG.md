@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Fix strict-CSP screenshot capture by measuring layout and device-pixel ratio without page eval.
+- Support the computer-use scroll and activation fallbacks for covered editors without page eval.
+
 ## 1.4.12 - 2026-09-10
 
 - Fix strict-CSP failures in computer-use element clicks by running the AX hit-test and remote-object cleanup without page eval.

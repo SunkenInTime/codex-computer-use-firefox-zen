@@ -45,11 +45,14 @@ const server = http.createServer((req, res) => {
       res.end("ok");
       finish(JSON.parse(body));
     });
+  } else if (req.url === "/fixture.css") {
+    res.setHeader("content-type", "text/css");
+    res.end(".editor {position:relative;margin-top:200vh}.overlay {position:absolute;inset:0;background:white}");
   } else {
     res.setHeader("content-type", "text/html");
     res.setHeader("Content-Security-Policy", "default-src 'self'; script-src 'self'; object-src 'none'");
     res.end(
-      "<!doctype html><title>Lifecycle fixture</title><p>isolated lifecycle test</p><input aria-label='Repository search'><button>Search</button>",
+      "<!doctype html><title>Lifecycle fixture</title><link rel='stylesheet' href='/fixture.css'><p>isolated lifecycle test</p><input aria-label='Repository search'><button>Search</button><textarea aria-label='Read-only editor' readonly>do not change</textarea><div class='editor'><textarea aria-label='Code editor'>old blueprint</textarea><div class='overlay'>Editor overlay</div></div>",
     );
   }
 });
@@ -105,6 +108,28 @@ for(const modifiers of [4,2]){
   const cleared=await chrome.debugger.sendCommand(debuggee,'Accessibility.getFullAXTree',{});
   if(cleared.nodes.find(n=>n.name?.value==='Repository search')?.value?.value!=='')throw Error('Select-all and Backspace did not clear input (modifiers='+modifiers+')');
 }
+const metrics=await chrome.debugger.sendCommand(debuggee,'Page.getLayoutMetrics',{});
+if(!(metrics.cssVisualViewport.clientWidth>0&&metrics.cssContentSize.height>metrics.cssVisualViewport.clientHeight))throw Error('Strict-CSP layout metrics missing document dimensions');
+const dpr=await chrome.debugger.sendCommand(debuggee,'Runtime.evaluate',{expression:'window.devicePixelRatio',returnByValue:true});
+if(!(dpr.result.value>0))throw Error('Strict-CSP device pixel ratio missing');
+const screenshot=await chrome.debugger.sendCommand(debuggee,'Page.captureScreenshot',{format:'png'});
+if(!screenshot.data?.startsWith('iVBOR'))throw Error('Strict-CSP screenshot missing PNG data');
+const editor=ax.nodes.find(n=>n.name?.value==='Code editor');
+const editorHandle=await chrome.debugger.sendCommand(debuggee,'DOM.resolveNode',{backendNodeId:editor.backendDOMNodeId});
+for(const functionDeclaration of [${JSON.stringify(axFunctions.scroll)},${JSON.stringify(axFunctions.activate)}]){
+  const response=await chrome.debugger.sendCommand(debuggee,'Runtime.callFunctionOn',{objectId:editorHandle.object.objectId,functionDeclaration,arguments:[{value:{}}],returnByValue:true,userGesture:true});
+  if(response.exceptionDetails||response.result.type!=='undefined')throw Error('AX editor fallback failed: '+JSON.stringify(response));
+}
+for(const type of ['keyDown','keyUp'])await chrome.debugger.sendCommand(debuggee,'Input.dispatchKeyEvent',{type,key:'a',code:'KeyA',modifiers:4});
+await chrome.debugger.sendCommand(debuggee,'Input.insertText',{text:'maintenance: |\\n  npm install'});
+const edited=await chrome.debugger.sendCommand(debuggee,'Accessibility.getFullAXTree',{});
+if(edited.nodes.find(n=>n.name?.value==='Code editor')?.value?.value!=='maintenance: |\\n  npm install')throw Error('Covered editor replacement failed');
+const readOnly=ax.nodes.find(n=>n.name?.value==='Read-only editor');
+const readOnlyHandle=await chrome.debugger.sendCommand(debuggee,'DOM.resolveNode',{backendNodeId:readOnly.backendDOMNodeId});
+const denied=await chrome.debugger.sendCommand(debuggee,'Runtime.callFunctionOn',{objectId:readOnlyHandle.object.objectId,functionDeclaration:${JSON.stringify(axFunctions.activate)},arguments:[{value:{}}],returnByValue:true});
+if(!denied.exceptionDetails?.text.includes('read-only'))throw Error('Editor fallback must reject read-only controls');
+await chrome.debugger.sendCommand(debuggee,'Runtime.releaseObject',{objectId:readOnlyHandle.object.objectId});
+await chrome.debugger.sendCommand(debuggee,'Runtime.releaseObject',{objectId:editorHandle.object.objectId});
 await chrome.debugger.sendCommand(debuggee,'Runtime.releaseObject',{objectId:resolved.object.objectId});
 const released=await chrome.debugger.sendCommand(debuggee,'Runtime.callFunctionOn',{objectId:resolved.object.objectId,functionDeclaration:${JSON.stringify(axFunctions.hitTest)},arguments:[{}],returnByValue:true});
 if(released.result?.type!=='undefined'||!released.exceptionDetails?.text)throw Error('Released handle must return CDP exceptionDetails');
@@ -114,7 +139,7 @@ const releasedGroup=await chrome.debugger.sendCommand(debuggee,'Runtime.callFunc
 if(!releasedGroup.exceptionDetails?.text)throw Error('Group cleanup retained the handle');
 const activeAfter=(await browser.tabs.query({active:true,currentWindow:true}))[0];
 if(activeAfter.id!==foreground.id||activations.includes(target.id))throw Error('CSP click activated background tab');
-await fetch(${JSON.stringify(url + "/result")},{method:'POST',body:JSON.stringify({ok:true,backgroundTabPreserved:true,strictCspAxClickTypeAndClear:true,objectCleanupAndExceptionContract:true,lifecycle:lifecycle.map(e=>e.params.name),loaderId:lastLoad.params.loaderId})});
+await fetch(${JSON.stringify(url + "/result")},{method:'POST',body:JSON.stringify({ok:true,backgroundTabPreserved:true,strictCspAxClickTypeAndClear:true,objectCleanupAndExceptionContract:true,strictCspScreenshotAndEditor:true,lifecycle:lifecycle.map(e=>e.params.name),loaderId:lastLoad.params.loaderId})});
 }catch(e){await fetch(${JSON.stringify(url + "/result")},{method:'POST',body:JSON.stringify({ok:false,error:String(e)+' '+e.stack})});}})();`,
 );
 const child = spawn(

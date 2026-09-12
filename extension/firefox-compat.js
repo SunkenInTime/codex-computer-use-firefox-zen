@@ -1160,6 +1160,60 @@
         }
         return {};
       }
+      case "layoutMetrics": {
+        const width = window.innerWidth;
+        const height = window.innerHeight;
+        const contentWidth = Math.max(document.documentElement?.scrollWidth ?? 0, document.body?.scrollWidth ?? 0, width);
+        const contentHeight = Math.max(document.documentElement?.scrollHeight ?? 0, document.body?.scrollHeight ?? 0, height);
+        return {
+          layoutViewport: { pageX: window.scrollX, pageY: window.scrollY, clientWidth: width, clientHeight: height },
+          visualViewport: { offsetX: 0, offsetY: 0, pageX: window.scrollX, pageY: window.scrollY, clientWidth: width, clientHeight: height, scale: 1, zoom: 1 },
+          contentSize: { x: 0, y: 0, width: contentWidth, height: contentHeight },
+          cssLayoutViewport: { pageX: window.scrollX, pageY: window.scrollY, clientWidth: width, clientHeight: height },
+          cssVisualViewport: { offsetX: 0, offsetY: 0, pageX: window.scrollX, pageY: window.scrollY, clientWidth: width, clientHeight: height, scale: 1, zoom: 1 },
+          cssContentSize: { x: 0, y: 0, width: contentWidth, height: contentHeight },
+        };
+      }
+      case "viewportSize":
+        return { width: window.innerWidth, height: window.innerHeight };
+      case "devicePixelRatio":
+        return window.devicePixelRatio;
+      case "accessibilityScroll":
+      case "accessibilityActivate": {
+        try {
+          const node = nodeFromPayload();
+          const element = node instanceof Element ? node : node?.parentElement;
+          if (operation === "accessibilityScroll") {
+            if (element == null) throw new Error("Cannot scroll a detached accessibility element");
+            Element.prototype.scrollIntoView.call(element, { behavior: "instant", block: "center", inline: "center" });
+          } else {
+            const control = element?.closest('a[href],button,input,select,textarea,label,[role="button"],[role="link"],[role="checkbox"],[role="radio"],[role="switch"]');
+            const associated = control instanceof HTMLLabelElement ? control.control : control;
+            const target = associated ?? element?.closest('[contenteditable="true"],[contenteditable=""],[contenteditable="plaintext-only"]') ?? element;
+            if (!target?.isConnected) throw new Error("Cannot interact with a detached element");
+            if (!(target instanceof HTMLElement)) throw new Error("Accessibility element does not support programmatic activation");
+            if (target.matches(":disabled")) throw new Error("Cannot interact with a disabled element");
+            if ((!associated && target.isContentEditable) || target instanceof HTMLTextAreaElement || (target instanceof HTMLInputElement && !["button", "submit", "reset", "checkbox", "radio", "image", "file", "hidden", "color", "range"].includes(target.type))) {
+              if ((target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) && target.readOnly) throw new Error("Cannot focus a read-only element");
+              target.focus({ preventScroll: true });
+              const root = target.getRootNode();
+              const focused = root instanceof ShadowRoot ? root.activeElement : target.ownerDocument.activeElement;
+              if (focused !== target && !focused?.contains(target)) throw new Error("Could not focus the target element");
+            } else {
+              target.click();
+            }
+          }
+          return { result: { type: "undefined" } };
+        } catch (error) {
+          return {
+            result: { type: "undefined" },
+            exceptionDetails: {
+              text: error?.message ?? String(error), lineNumber: 0, columnNumber: 0,
+              exception: { type: "object", subtype: "error", className: error?.name ?? "Error", description: String(error) },
+            },
+          };
+        }
+      }
       case "boxModel": {
         const node = nodeFromPayload();
         if (!(node instanceof Element)) throw new Error("DOM element not found");
@@ -2107,6 +2161,9 @@
     const returnByValue = params.returnByValue === true;
     const awaitPromise = params.awaitPromise === true;
     const objectGroup = typeof params.objectGroup === "string" ? params.objectGroup : null;
+    if (expression === "window.devicePixelRatio") {
+      return { result: byValueRemote(await executeCspSafePageOperation(tabId, "devicePixelRatio", {}, { frameId })) };
+    }
     const browserUseBindingName = browserUseBindingNameFromExpression(expression);
     if (browserUseBindingName != null) {
       const installed = bindingNamesByTab.get(tabId)?.has(browserUseBindingName) === true;
@@ -2238,6 +2295,20 @@
       && declaration.includes("fallbackPoint:") && declaration.includes("hitsTarget:")
       && declaration.includes("viewportSize:")) {
       return executeCspSafePageOperation(tabId, "accessibilityHitTest", { objectId: params.objectId }, { frameId });
+    }
+    if (params.objectId && params.returnByValue === true
+      && declaration.startsWith("function (argument) { const __name = (target) => target; return (")
+      && declaration.endsWith(").call(this, argument); }")) {
+      let operation;
+      if (declaration.includes("Cannot scroll a detached accessibility element")
+        && declaration.includes("Element.prototype.scrollIntoView.call")) {
+        operation = "accessibilityScroll";
+      } else if (declaration.includes("Accessibility element does not support programmatic activation")
+        && declaration.includes("Cannot focus a read-only element")
+        && declaration.includes("Could not focus the target element")) {
+        operation = "accessibilityActivate";
+      }
+      if (operation) return executeCspSafePageOperation(tabId, operation, { objectId: params.objectId }, { frameId });
     }
     const argumentsJson = JSON.stringify(params.arguments ?? []);
     const returnByValue = params.returnByValue === true;
@@ -2598,31 +2669,11 @@
   }
 
   async function getLayoutMetrics(tabId, frameId = 0) {
-    return executeUserScript(
-      tabId,
-      operationScript(`
-        const width = window.innerWidth;
-        const height = window.innerHeight;
-        const contentWidth = Math.max(document.documentElement?.scrollWidth ?? 0, document.body?.scrollWidth ?? 0, width);
-        const contentHeight = Math.max(document.documentElement?.scrollHeight ?? 0, document.body?.scrollHeight ?? 0, height);
-        return {
-          layoutViewport: { pageX: window.scrollX, pageY: window.scrollY, clientWidth: width, clientHeight: height },
-          visualViewport: { offsetX: 0, offsetY: 0, pageX: window.scrollX, pageY: window.scrollY, clientWidth: width, clientHeight: height, scale: 1, zoom: 1 },
-          contentSize: { x: 0, y: 0, width: contentWidth, height: contentHeight },
-          cssLayoutViewport: { pageX: window.scrollX, pageY: window.scrollY, clientWidth: width, clientHeight: height },
-          cssVisualViewport: { offsetX: 0, offsetY: 0, pageX: window.scrollX, pageY: window.scrollY, clientWidth: width, clientHeight: height, scale: 1, zoom: 1 },
-          cssContentSize: { x: 0, y: 0, width: contentWidth, height: contentHeight },
-        };
-      `),
-      { frameId },
-    );
+    return executeCspSafePageOperation(tabId, "layoutMetrics", {}, { frameId });
   }
 
   async function readViewportSize(tabId) {
-    return executeUserScript(
-      tabId,
-      operationScript(`return { width: window.innerWidth, height: window.innerHeight };`),
-    );
+    return executeCspSafePageOperation(tabId, "viewportSize", {});
   }
 
   async function resizeWindowForViewport(windowId, tabId, viewport, state) {
