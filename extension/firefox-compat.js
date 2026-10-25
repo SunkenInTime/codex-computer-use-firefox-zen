@@ -790,17 +790,52 @@
             });
           }
           parseSelector(selector) {
-            const parts = String(selector).split(" >> ").map((source) => {
+            // Browser Use serializes locators using Playwright's internal
+            // selector grammar. A delimiter inside a quoted name or regexp is
+            // content, not another engine in the chain.
+            const input = String(selector);
+            const sources = [];
+            let start = 0;
+            let quote = null;
+            let regexp = false;
+            let regexpClass = false;
+            for (let index = 0; index < input.length; index += 1) {
+              const char = input[index];
+              if (char === "\\") { index += 1; continue; }
+              if (quote != null) { if (char === quote) quote = null; continue; }
+              if (regexp) {
+                if (char === "[") regexpClass = true;
+                if (char === "]") regexpClass = false;
+                if (char === "/" && !regexpClass) regexp = false;
+                continue;
+              }
+              if (char === '"' || char === "'") { quote = char; continue; }
+              if (char === "/" && /=\s*$/u.test(input.slice(start, index))) { regexp = true; continue; }
+              if (char === ">" && input[index + 1] === ">") {
+                sources.push(input.slice(start, index).trim());
+                start = index + 2;
+                index += 1;
+              }
+            }
+            sources.push(input.slice(start).trim());
+            const parts = sources.map((source) => {
               const engine = /^([a-z][\w-]*(?::[\w-]+)?)=([\s\S]*)$/iu.exec(source);
               if (engine == null) return { name: "css", body: source, source };
               return { name: engine[1], body: engine[2], source };
             });
             return { parts };
           }
+          /**
+           * Resolve supported locator chains without dynamic string evaluation.
+           * @param {{parts: Array<{name: string, body: string}>}} parsedSelector Parsed locator engines.
+           * @param {Document|Element|ShadowRoot} root The document or subtree to search.
+           * @returns {(Element|Document)[]} Unique matching nodes, preserving selector order.
+           */
           querySelectorAll(parsedSelector, root) {
             let matches = [root];
             const deepQuery = (scope, selector) => {
               const found = [...(scope.querySelectorAll?.(selector) ?? [])];
+              if (scope.shadowRoot) found.push(...deepQuery(scope.shadowRoot, selector));
               for (const element of [...(scope.querySelectorAll?.("*") ?? [])]) {
                 if (element.shadowRoot) found.push(...deepQuery(element.shadowRoot, selector));
               }
@@ -808,6 +843,8 @@
             };
             const textBody = (body) => {
               const source = String(body);
+              const regexp = /^\/([\s\S]*)\/([dgimsuvy]*)$/u.exec(source);
+              if (regexp != null) return { regexp: new RegExp(regexp[1], regexp[2]) };
               const flagged = /^([\s\S]*)([is])$/u.exec(source);
               let flag = null;
               let value = source;
@@ -823,6 +860,108 @@
               return { value, caseSensitive: flag === "s" };
             };
             const normalizeText = (value) => String(value).replace(/\s+/gu, " ").trim();
+            const matchesText = (value, matcher, exact = false) => {
+              if (matcher.regexp) {
+                matcher.regexp.lastIndex = 0;
+                return matcher.regexp.test(String(value));
+              }
+              const actual = normalizeText(value);
+              const expected = normalizeText(matcher.value);
+              if (matcher.caseSensitive) return exact ? actual === expected : actual.includes(expected);
+              return actual.toLowerCase().includes(expected.toLowerCase());
+            };
+            const elementText = (element) => {
+              if (["SCRIPT", "STYLE", "HEAD"].includes(element.tagName)) return "";
+              if (element.tagName === "INPUT" && ["button", "submit", "reset"].includes(element.type)) return element.value ?? "";
+              if (element.childNodes?.length) {
+                return [...element.childNodes].map((child) => child.nodeType === Node.TEXT_NODE
+                  ? child.nodeValue ?? "" : elementText(child)).join("")
+                  + (element.shadowRoot ? elementText(element.shadowRoot) : "");
+              }
+              return (element.textContent ?? "") + (element.shadowRoot ? elementText(element.shadowRoot) : "");
+            };
+            // This static helper covers common native controls and explicit
+            // roles, not the complete AccName algorithm used by Playwright.
+            const roleFor = (element) => {
+              const explicit = element.getAttribute?.("role");
+              if (explicit) return explicit.trim().split(/\s+/u)[0];
+              if (/^H[1-6]$/u.test(element.tagName)) return "heading";
+              if (element.tagName === "A") return element.hasAttribute("href") ? "link" : null;
+              if (element.tagName === "INPUT") {
+                if (["button", "submit", "reset", "image"].includes(element.type)) return "button";
+                if (["checkbox", "radio"].includes(element.type)) return element.type;
+                if (element.type === "search") return "searchbox";
+                if (element.type === "number") return "spinbutton";
+                if (element.type === "range") return "slider";
+                if (["text", "email", "tel", "url"].includes(element.type)) return element.hasAttribute("list") ? "combobox" : "textbox";
+                return null;
+              }
+              if (element.tagName === "SELECT") return element.multiple || element.size > 1 ? "listbox" : "combobox";
+              return ({ BUTTON: "button", TEXTAREA: "textbox", IMG: "img", MAIN: "main", NAV: "navigation" })[element.tagName] ?? null;
+            };
+            // Role names use rendered content, unlike text filters, which may
+            // include hidden text. Image alternatives contribute to names too.
+            const roleText = (node, includeHidden = false) => {
+              if (node.nodeType === Node.TEXT_NODE) return node.nodeValue ?? "";
+              if (["SCRIPT", "STYLE", "HEAD"].includes(node.tagName)) return "";
+              if (!includeHidden && node.nodeType === Node.ELEMENT_NODE && hiddenForRole(node)) return "";
+              const label = node.getAttribute?.("aria-label");
+              if (label?.trim()) return label;
+              if (node.tagName === "IMG" || (node.tagName === "INPUT" && node.type === "image")) {
+                return node.getAttribute?.("alt") ?? "";
+              }
+              if (node.shadowRoot) return roleText(node.shadowRoot, includeHidden);
+              const assigned = node.tagName === "SLOT" ? node.assignedNodes?.({ flatten: true }) : null;
+              const children = assigned?.length ? assigned : node.childNodes;
+              return children?.length
+                ? [...children].map(child => roleText(child, includeHidden)).join("")
+                : node.textContent ?? "";
+            };
+            const nameFor = (element, includeHidden = false) => {
+              const labelledBy = element.getAttribute?.("aria-labelledby");
+              if (labelledBy) {
+                const labels = labelledBy.trim().split(/\s+/u).map((id) => element.ownerDocument?.getElementById(id)
+                  ?? document.getElementById?.(id)).filter(Boolean);
+                if (labels.length) return labels.map(label => roleText(label, true)).join(" ");
+              }
+              const label = element.getAttribute?.("aria-label");
+              if (label?.trim()) return label;
+              if (element.labels?.length) return [...element.labels].map(label => roleText(label, true)).join(" ");
+              if (["IMG", "INPUT"].includes(element.tagName) && element.hasAttribute("alt")) return element.getAttribute("alt");
+              if (element.tagName === "INPUT" && ["button", "submit", "reset"].includes(element.type)) {
+                if (element.value) return element.value;
+                if (!element.hasAttribute("value") && element.type !== "button") {
+                  return element.type === "submit" ? "Submit" : "Reset";
+                }
+              }
+              return roleText(element, includeHidden) || element.getAttribute?.("title") || element.getAttribute?.("placeholder") || "";
+            };
+            const hiddenForRole = (element) => {
+              for (let ancestor = element; ancestor?.nodeType === Node.ELEMENT_NODE;
+                ancestor = ancestor.parentElement ?? ancestor.getRootNode?.()?.host) {
+                const style = (ancestor.ownerDocument?.defaultView?.getComputedStyle ?? getComputedStyle)(ancestor);
+                if (ancestor.hidden || ancestor.getAttribute("aria-hidden") === "true"
+                  || style.display === "none") return true;
+              }
+              return ["hidden", "collapse"].includes((element.ownerDocument?.defaultView?.getComputedStyle ?? getComputedStyle)(element).visibility);
+            };
+            const roleOptions = (body) => {
+              const role = /^([\w-]+)/u.exec(body);
+              if (!role) throw new Error("Invalid Firefox Playwright role selector");
+              const options = { role: role[1].toLowerCase(), includeHidden: false };
+              let rest = body.slice(role[0].length);
+              while (rest) {
+                const attribute = /^\[(name|level|include-hidden)=("(?:\\.|[^"\\])*"[is]?|\/(?:\\.|[^/\\])*\/[dgimsuvy]*|\d+|true|false)\]/u.exec(rest);
+                if (!attribute) throw new Error(`Unsupported Firefox Playwright role attribute: ${rest}`);
+                const [, key, value] = attribute;
+                if (key === "name" && (value.startsWith('"') || value.startsWith("/"))) options.name = textBody(value);
+                else if (key === "level" && options.role === "heading" && /^\d+$/u.test(value)) options.level = Number(value);
+                else if (key === "include-hidden" && /^(true|false)$/u.test(value)) options.includeHidden = value === "true";
+                else throw new Error(`Unsupported Firefox Playwright role attribute: ${attribute[0]}`);
+                rest = rest.slice(attribute[0].length);
+              }
+              return options;
+            };
             for (const part of parsedSelector.parts ?? []) {
               if (part.name === "nth") {
                 let index = Number(part.body);
@@ -830,10 +969,26 @@
                 matches = matches.slice(index, index + 1);
                 continue;
               }
+              // hasText filters the current candidate; it must not query and
+              // return a matching descendant (which could change click targets).
+              if (part.name === "internal:has-text" || part.name === "internal:has-not-text") {
+                const matcher = textBody(part.body);
+                matches = matches.filter((element) => matchesText(elementText(element), matcher)
+                  === (part.name === "internal:has-text"));
+                continue;
+              }
+              const options = part.name === "internal:role" ? roleOptions(part.body) : null;
               const next = [];
               for (const scope of matches) {
                 if (part.name === "css") {
                   next.push(...deepQuery(scope, part.body));
+                } else if (options != null) {
+                  next.push(...deepQuery(scope, "*").filter((element) => {
+                    if (roleFor(element) !== options.role || (!options.includeHidden && hiddenForRole(element))) return false;
+                    if (options.level != null && Number(element.getAttribute("aria-level")
+                      ?? element.tagName.slice(1)) !== options.level) return false;
+                    return options.name == null || matchesText(normalizeText(nameFor(element, options.includeHidden)), options.name, true);
+                  }));
                 } else if (part.name === "internal:label") {
                   const labelMatcher = textBody(part.body);
                   const expected = normalizeText(labelMatcher.value);
@@ -848,7 +1003,9 @@
                       : label.toLowerCase().includes(expected.toLowerCase()));
                   }));
                 } else if (part.name === "internal:control" && part.body === "enter-frame") {
-                  continue;
+                  const frameDocument = scope.contentDocument;
+                  if (frameDocument == null) throw new Error("Cross-origin frame selectors require a separate CDP frame session.");
+                  next.push(frameDocument);
                 } else {
                   throw new Error(`Unsupported Firefox Playwright selector engine: ${part.name}`);
                 }

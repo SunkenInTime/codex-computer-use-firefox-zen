@@ -45,14 +45,24 @@ const server = http.createServer((req, res) => {
       res.end("ok");
       finish(JSON.parse(body));
     });
+  } else if (req.url === "/child") {
+    res.setHeader("content-type", "text/html");
+    res.end("<!doctype html><title>Frame fixture</title><button>Frame button</button>");
+  } else if (req.url === "/role-frame") {
+    res.setHeader("content-type", "text/html");
+    res.end(`<link rel="stylesheet" href="/fixture.css">
+      <div aria-hidden="true"><button>Frame Save</button></div>
+      <div hidden><button>Frame Save</button></div>
+      <div class="role-hidden"><button>Frame Save</button></div>
+      <button>Frame Save</button>`);
   } else if (req.url === "/fixture.css") {
     res.setHeader("content-type", "text/css");
-    res.end(".editor {position:relative;margin-top:200vh}.overlay {position:absolute;inset:0;background:white}");
+    res.end(".role-hidden {display:none}.editor {position:relative;margin-top:200vh}.overlay {position:absolute;inset:0;background:white}");
   } else {
     res.setHeader("content-type", "text/html");
     res.setHeader("Content-Security-Policy", "default-src 'self'; script-src 'self'; object-src 'none'");
     res.end(
-      "<!doctype html><title>Lifecycle fixture</title><link rel='stylesheet' href='/fixture.css'><p>isolated lifecycle test</p><input aria-label='Repository search'><button>Search</button><textarea aria-label='Read-only editor' readonly>do not change</textarea><div class='editor'><textarea aria-label='Code editor'>old blueprint</textarea><div class='overlay'>Editor overlay</div></div>",
+      "<!doctype html><title>Lifecycle fixture</title><link rel='stylesheet' href='/fixture.css'><p>isolated lifecycle test</p><button>Save<span hidden>draft</span></button><input type='button' value='Native button'><input type='submit' value='Native submit'><input type='reset' value='Native reset'><input type='submit'><input type='reset'><a href='/home'><img alt='Home'></a><iframe id='role-frame' src='/role-frame'></iframe><label id='shared-label'>Shared accessible label</label><button aria-labelledby='shared-label'>Labeled button</button><iframe src='/child' title='Child frame'></iframe><input aria-label='Repository search'><button>Search</button><a id='charger' href='/charger'><h2 aria-label='UGREEN Nexode 65W'>UGREEN Nexode 65W charger</h2></a><h6>Other charger</h6><h2 aria-hidden='true'>Hidden charger</h2><textarea aria-label='Read-only editor' readonly>do not change</textarea><div class='editor'><textarea aria-label='Code editor'>old blueprint</textarea><div class='overlay'>Editor overlay</div></div>",
     );
   }
 });
@@ -90,6 +100,48 @@ const tree=await chrome.debugger.sendCommand(debuggee,'Page.getFrameTree',{});
 if(tree.frameTree.frame.loaderId!==lastLoad.params.loaderId)throw Error('Loader mismatch');
 const documentEvents=events.filter(e=>['Network.requestWillBeSent','Network.responseReceived'].includes(e.method)&&e.params.type==='Document'&&(e.params.request?.url??e.params.response?.url)===${JSON.stringify(url + "/next")}&&e.params.requestId.startsWith('firefox-request-'));
 if(!documentEvents.length||documentEvents.some(e=>e.params.loaderId!==lastLoad.params.loaderId))throw Error('Network loader mismatch: '+JSON.stringify({documentEvents, lifecycle}));
+await chrome.debugger.sendCommand(debuggee,'Runtime.evaluate',{
+ expression:'(() => { window.__codexPlaywrightInjected = new PlaywrightInjected.InjectedScript(window, {}); })()',returnByValue:false
+});
+// Run the actual installed static selector helper against a real DOM under
+// strict CSP. This does not claim full Browser Use client/click acceptance.
+const selectorResults=await browser.scripting.executeScript({target:{tabId:target.id},world:'MAIN',func:()=>{
+ const helper=window.__codexPlaywrightInjected;
+ const query=selector=>helper.querySelectorAll(helper.parseSelector(selector),document);
+ const heading=query('internal:role=heading[name="UGREEN Nexode 65W"s] >> nth=0');
+ const filtered=query('a[href] >> internal:has-text="UGREEN Nexode 65W"i');
+ if(heading.length!==1||heading[0].tagName!=='H2')throw Error('Exact role/nth failed');
+ if(filtered.length!==1||filtered[0].id!=='charger')throw Error('hasText changed the target');
+ if(query('internal:role=heading[name="ugreen"i]').length!==1)throw Error('Substring role failed');
+ if(query('internal:role=heading[name="ugreen"s]').length!==0)throw Error('Exact role matched substring');
+ if(query('internal:role=heading[level=6]').length!==1)throw Error('H6 role failed');
+ if(query('internal:role=heading[name="Hidden charger"s]').length!==0)throw Error('Hidden role leaked');
+ if(query('internal:role=heading[name="Hidden charger"s][include-hidden=true]').length!==1)throw Error('includeHidden failed');
+ if(query('a[href] >> internal:has-text=/ugreen/i').length!==1)throw Error('Regexp hasText failed');
+ if(query('a#charger >> internal:has-not-text="UGREEN"i').length!==0)throw Error('hasNotText failed');
+ const frame=query('iframe >> internal:control=enter-frame >> internal:role=button[name="Frame button"s]');
+ if(frame.length!==1)throw Error('Same-origin frame selector failed');
+ return true;
+}});
+if(selectorResults[0]?.result!==true)throw Error('Static selector regression failed: '+JSON.stringify(selectorResults));
+const selectorChecks=await browser.scripting.executeScript({target:{tabId:target.id},world:'MAIN',func:()=>{
+ const helper=globalThis.__codexPlaywrightInjected;
+ const count=selector=>helper.querySelectorAll(helper.parseSelector(selector),document).length;
+ return {
+  nativeButton:count('internal:role=button[name="Native button"s]'),
+  nativeSubmit:count('internal:role=button[name="Native submit"s]'),
+  nativeReset:count('internal:role=button[name="Native reset"s]'),
+  defaultSubmit:count('internal:role=button[name="Submit"s]'),
+  defaultReset:count('internal:role=button[name="Reset"s]'),
+  hiddenFrame:count('iframe#role-frame >> internal:control=enter-frame >> internal:role=button[name="Frame Save"s]'),
+  save:count('internal:role=button[name="Save"s]'),
+  wrongSave:count('internal:role=button[name="Savedraft"s]'),
+  home:count('internal:role=link[name="Home"s]'),
+  textFilter:count('internal:role=button[name="Save"s] >> internal:has-text="Savedraft"s'),
+ };
+}});
+const counts=selectorChecks[0]?.result;
+if(!counts||['nativeButton','nativeSubmit','nativeReset','defaultSubmit','defaultReset'].some(key=>counts[key]!==1)||counts.hiddenFrame!==1||counts.save!==1||counts.wrongSave!==0||counts.home!==1||counts.textFilter!==1)throw Error('Role-name/frame regression: '+JSON.stringify(counts));
 const ax=await chrome.debugger.sendCommand(debuggee,'Accessibility.getFullAXTree',{});
 const input=ax.nodes.find(n=>n.name?.value==='Repository search');
 if(!input)throw Error('Search input missing from AX tree');
@@ -139,7 +191,7 @@ const releasedGroup=await chrome.debugger.sendCommand(debuggee,'Runtime.callFunc
 if(!releasedGroup.exceptionDetails?.text)throw Error('Group cleanup retained the handle');
 const activeAfter=(await browser.tabs.query({active:true,currentWindow:true}))[0];
 if(activeAfter.id!==foreground.id||activations.includes(target.id))throw Error('CSP click activated background tab');
-await fetch(${JSON.stringify(url + "/result")},{method:'POST',body:JSON.stringify({ok:true,backgroundTabPreserved:true,strictCspAxClickTypeAndClear:true,objectCleanupAndExceptionContract:true,strictCspScreenshotAndEditor:true,lifecycle:lifecycle.map(e=>e.params.name),loaderId:lastLoad.params.loaderId})});
+await fetch(${JSON.stringify(url + "/result")},{method:'POST',body:JSON.stringify({ok:true,strictCspRoleAndTextSelectors:true,sameOriginFrameSelector:true,backgroundTabPreserved:true,strictCspAxClickTypeAndClear:true,objectCleanupAndExceptionContract:true,strictCspScreenshotAndEditor:true,lifecycle:lifecycle.map(e=>e.params.name),loaderId:lastLoad.params.loaderId})});
 }catch(e){await fetch(${JSON.stringify(url + "/result")},{method:'POST',body:JSON.stringify({ok:false,error:String(e)+' '+e.stack})});}})();`,
 );
 const child = spawn(
