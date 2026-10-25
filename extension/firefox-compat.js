@@ -909,38 +909,116 @@
         const root = payload.rootBackendNodeId == null
           ? document.documentElement
           : (state.nodes.get(payload.rootBackendNodeId) ?? document.documentElement);
-        const elements = [root, ...(root.querySelectorAll?.("*") ?? [])]
-          .filter((element) => element instanceof Element);
-        const ids = new Map(elements.map((element) => [element, `firefox-ax-${nodeId(element)}`]));
-        const roleFor = (element) => element.getAttribute?.("role") || ({
-          A: "link", BUTTON: "button", INPUT: element.type === "checkbox" ? "checkbox" : "textbox",
-          TEXTAREA: "textbox", SELECT: "combobox", IMG: "img", H1: "heading", H2: "heading",
-          H3: "heading", MAIN: "main", NAV: "navigation", FORM: "form",
-        }[element.tagName] ?? (element.isContentEditable ? "textbox" : "generic"));
-        const nameFor = (element) => element.getAttribute?.("aria-label")
-          || element.getAttribute?.("alt")
-          || element.getAttribute?.("title")
-          || element.getAttribute?.("placeholder")
-          || element.labels?.[0]?.textContent?.trim()
-          || element.textContent?.trim()?.slice(0, 500)
-          || "";
-        return {
-          nodes: elements.map((element) => {
-            const backendDOMNodeId = nodeId(element);
-            return {
-              nodeId: ids.get(element),
-              ignored: false,
-              role: { type: "role", value: roleFor(element) },
-              name: { type: "computedString", value: nameFor(element) },
-              description: { type: "computedString", value: element.getAttribute?.("aria-description") ?? "" },
-              value: { type: "computedString", value: element.value ?? element.textContent ?? "" },
-              properties: [],
-              childIds: [...element.children].map((child) => ids.get(child)).filter(Boolean),
-              backendDOMNodeId,
-              frameId: payload.frameId,
-            };
-          }),
+        const excludedTags = new Set(["HEAD", "SCRIPT", "STYLE", "TEMPLATE", "NOSCRIPT"]);
+        const prunesSubtree = (element) => {
+          if (excludedTags.has(element.tagName) || element.hidden || element.inert
+            || element.getAttribute?.("aria-hidden") === "true"
+            || (element.tagName === "INPUT" && element.type === "hidden")) return true;
+          const style = getComputedStyle(element);
+          return style.display === "none";
         };
+        const visible = (element) => !["hidden", "collapse"].includes(getComputedStyle(element).visibility);
+        // Use the composed tree: assigned content replaces slot fallback, and
+        // a shadow host's light children are reached through its slots only.
+        const childrenFor = (node) => {
+          if (node.shadowRoot) return [...node.shadowRoot.childNodes];
+          if (node.tagName === "SLOT") {
+            const assigned = node.assignedNodes?.({ flatten: true });
+            if (assigned?.length) return [...assigned];
+          }
+          return [...(node.childNodes ?? [])];
+        };
+        const roleFor = (element) => {
+          const explicit = element.getAttribute?.("role")?.trim().split(/\s+/u)[0];
+          if (explicit) return explicit;
+          if (element === document.documentElement) return "RootWebArea";
+          if (element.tagName === "INPUT") return ({
+            button: "button", submit: "button", reset: "button", checkbox: "checkbox",
+            radio: "radio", range: "slider", number: "spinbutton", search: "searchbox",
+          }[element.type] ?? "textbox");
+          return ({
+            A: element.hasAttribute("href") ? "link" : "generic", BUTTON: "button",
+            TEXTAREA: "textbox", SELECT: element.multiple ? "listbox" : "combobox",
+            OPTION: "option", IMG: "image", H1: "heading", H2: "heading", H3: "heading",
+            H4: "heading", H5: "heading", H6: "heading", MAIN: "main", NAV: "navigation",
+            FORM: "form", TABLE: "table", TR: "row", TH: "columnheader", TD: "cell",
+            UL: "list", OL: "list", LI: "listitem", IFRAME: "Iframe", FRAME: "Iframe",
+          }[element.tagName] ?? (element.isContentEditable ? "textbox" : "generic"));
+        };
+        // Read rendered descendants only for roles whose names come from content.
+        // Generic ancestors used to duplicate entire documents (including scripts)
+        // in both name and value, making snapshots quadratic in page depth.
+        const textFor = (node, includeHidden = false, parentVisible = true) => {
+          if (node.nodeType === Node.TEXT_NODE) return includeHidden || parentVisible ? node.nodeValue ?? "" : "";
+          if (node instanceof Element && (excludedTags.has(node.tagName) || (!includeHidden && prunesSubtree(node)))) return "";
+          const nodeVisible = !(node instanceof Element) || visible(node);
+          if (node.tagName === "BR") return includeHidden || nodeVisible ? " " : "";
+          // Visibility can be restored by descendants, so keep descending.
+          const text = childrenFor(node).map(child => textFor(child, includeHidden, nodeVisible)).join("");
+          // Inline fragments join directly; rendered boxes create word breaks.
+          // display:contents (including slots) has no box of its own.
+          const separatesText = node instanceof Element
+            && !["inline", "contents"].includes(getComputedStyle(node).display);
+          return separatesText && (text || nodeVisible || includeHidden) ? ` ${text} ` : text;
+        };
+        const normalize = (text) => String(text ?? "").replace(/\s+/gu, " ").trim();
+        const contentNamedRoles = new Set(["button", "link", "heading", "option", "tab", "menuitem", "checkbox", "radio", "switch", "cell", "columnheader", "rowheader"]);
+        const nameFor = (element, role) => {
+          if (role === "RootWebArea") return document.title ?? "";
+          const labelledBy = element.getAttribute?.("aria-labelledby");
+          if (labelledBy) {
+            const name = normalize(labelledBy.trim().split(/\s+/u).map((id) => textFor(document.getElementById(id) ?? {}, true)).join(" "));
+            if (name) return name;
+          }
+          const labels = [...(element.labels ?? [])].map((label) => textFor(label, true)).join(" ");
+          return normalize(element.getAttribute?.("aria-label") || labels
+            || element.getAttribute?.("alt") || element.getAttribute?.("title")
+            || element.getAttribute?.("placeholder")
+            || (contentNamedRoles.has(role) ? textFor(element) : ""));
+        };
+        const nodes = [];
+        const visit = (node, parentId, parentVisible = true) => {
+          const isText = node.nodeType === Node.TEXT_NODE;
+          if (isText && !parentVisible) return [];
+          if (!isText && (!(node instanceof Element) || prunesSubtree(node))) return [];
+          if (!isText && !visible(node)) {
+            return childrenFor(node).flatMap(child => visit(child, parentId, false));
+          }
+          const name = isText ? normalize(node.nodeValue) : nameFor(node, roleFor(node));
+          if (isText && !name) return [];
+          const backendDOMNodeId = nodeId(node);
+          const id = `firefox-ax-${backendDOMNodeId}`;
+          const role = isText ? "StaticText" : roleFor(node);
+          const entry = {
+            nodeId: id, ignored: false,
+            role: { type: "role", value: role },
+            name: { type: "computedString", value: name },
+            properties: [], childIds: [], backendDOMNodeId, frameId: payload.frameId,
+          };
+          if (parentId) entry.parentId = parentId;
+          if (!isText) {
+            const description = node.getAttribute?.("aria-description");
+            if (description) entry.description = { type: "computedString", value: description };
+            if (typeof node.value === "string" && node.type !== "password") {
+              entry.value = { type: "string", value: node.value };
+            } else if (node.isContentEditable) {
+              entry.value = { type: "string", value: normalize(textFor(node)) };
+            }
+            if (node.disabled) entry.properties.push({ name: "disabled", value: { type: "boolean", value: true } });
+            if (node.readOnly) entry.properties.push({ name: "readonly", value: { type: "boolean", value: true } });
+            if ("checked" in node && ["checkbox", "radio", "switch"].includes(role)) {
+              entry.properties.push({ name: "checked", value: { type: "tristate", value: String(node.checked) } });
+            }
+            if (role === "heading") entry.properties.push({ name: "level", value: { type: "integer", value: Number(node.getAttribute("aria-level") ?? node.tagName.slice(1)) } });
+          }
+          nodes.push(entry);
+          for (const child of childrenFor(node)) {
+            entry.childIds.push(...visit(child, id));
+          }
+          return [id];
+        };
+        visit(root, null);
+        return { nodes };
       }
       case "captureDomSnapshot": {
         const strings = [];
