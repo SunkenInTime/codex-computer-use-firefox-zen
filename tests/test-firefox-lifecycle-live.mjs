@@ -35,6 +35,10 @@ const manifest = {
 fs.writeFileSync(path.join(dir, "manifest.json"), JSON.stringify(manifest));
 let finish;
 const result = new Promise((r) => (finish = r));
+const sidebarRoot = path.join(root, "extension/codex-sidepanel");
+const assetsRoot = path.join(sidebarRoot, "assets");
+const footerStyle = fs.readdirSync(assetsRoot).find(name => /^composer-footer-.*\.css$/u.test(name));
+if (!footerStyle) throw new Error("The shipped footer stylesheet is missing.");
 const requests = [];
 const server = http.createServer((req, res) => {
   requests.push(req.url);
@@ -45,6 +49,30 @@ const server = http.createServer((req, res) => {
       res.end("ok");
       finish(JSON.parse(body));
     });
+  } else if (req.url === "/footer-layout") {
+    res.setHeader("content-type", "text/html");
+    res.end(`<html data-codex-window-type="chrome-extension"><head>
+      <link rel="stylesheet" href="/assets/${footerStyle}">
+      <link rel="stylesheet" href="/sidebar-layout.css">
+      <script type="module" src="/footer-fixture.js"></script></head><body>
+      ${[280, 320, 400].map(width => `<div data-host-width="${width}" style="display:flex;width:${width}px"><div class="mount" style="flex:1;min-width:0"></div></div>`).join("")}
+      </body></html>`);
+  } else if (req.url === "/footer-fixture.js") {
+    res.setHeader("content-type", "text/javascript");
+    res.end(`import { r as react } from "/assets/jsx-runtime-CNO-vQvX.js";
+      import { t as client } from "/assets/client-DpueprnI.js";
+      import { t as Footer } from "/assets/composer-footer-Cw2FUQYZ.js";
+      const React = react();
+      for (const mount of document.querySelectorAll(".mount")) {
+        client().createRoot(mount).render(React.createElement(Footer, null,
+          React.createElement("div", { "data-composer-utility-bar-scroll-area": "", style: { overflowX: "auto" } }, "Composer actions")));
+      }`);
+  } else if (req.url === "/sidebar-layout.css") {
+    res.setHeader("content-type", "text/css");
+    res.end(fs.readFileSync(path.join(sidebarRoot, "firefox-sidebar-layout.css")));
+  } else if (/^\/assets\/[^/]+\.(js|css)$/u.test(req.url)) {
+    res.setHeader("content-type", req.url.endsWith(".css") ? "text/css" : "text/javascript");
+    res.end(fs.readFileSync(path.join(assetsRoot, req.url.slice("/assets/".length))));
   } else if (req.url === "/fixture.css") {
     res.setHeader("content-type", "text/css");
     res.end(".editor {position:relative;margin-top:200vh}.overlay {position:absolute;inset:0;background:white}");
@@ -52,7 +80,7 @@ const server = http.createServer((req, res) => {
     res.setHeader("content-type", "text/html");
     res.setHeader("Content-Security-Policy", "default-src 'self'; script-src 'self'; object-src 'none'");
     res.end(
-      "<!doctype html><title>Lifecycle fixture</title><link rel='stylesheet' href='/fixture.css'><p>isolated lifecycle test</p><input aria-label='Repository search'><button>Search</button><textarea aria-label='Read-only editor' readonly>do not change</textarea><div class='editor'><textarea aria-label='Code editor'>old blueprint</textarea><div class='overlay'>Editor overlay</div></div>",
+      "<!doctype html><title>Lifecycle fixture</title><link rel='stylesheet' href='/fixture.css'><p>isolated lifecycle test</p><iframe id='footer-layout' src='/footer-layout'></iframe><input aria-label='Repository search'><button>Search</button><textarea aria-label='Read-only editor' readonly>do not change</textarea><div class='editor'><textarea aria-label='Code editor'>old blueprint</textarea><div class='overlay'>Editor overlay</div></div>",
     );
   }
 });
@@ -90,6 +118,23 @@ const tree=await chrome.debugger.sendCommand(debuggee,'Page.getFrameTree',{});
 if(tree.frameTree.frame.loaderId!==lastLoad.params.loaderId)throw Error('Loader mismatch');
 const documentEvents=events.filter(e=>['Network.requestWillBeSent','Network.responseReceived'].includes(e.method)&&e.params.type==='Document'&&(e.params.request?.url??e.params.response?.url)===${JSON.stringify(url + "/next")}&&e.params.requestId.startsWith('firefox-request-'));
 if(!documentEvents.length||documentEvents.some(e=>e.params.loaderId!==lastLoad.params.loaderId))throw Error('Network loader mismatch: '+JSON.stringify({documentEvents, lifecycle}));
+let footerChecks;
+for(let attempt=0;attempt<100;attempt++){
+ const results=await browser.scripting.executeScript({target:{tabId:target.id},func:()=>{
+  const doc=document.querySelector('#footer-layout').contentDocument;
+  return [...doc.querySelectorAll('[class*="_footer_"]')].map(footer=>({
+    max:doc.defaultView.getComputedStyle(footer).maxWidth,
+    min:doc.defaultView.getComputedStyle(footer).minWidth,
+    width:footer.getBoundingClientRect().width,
+    host:Number(footer.closest('[data-host-width]').dataset.hostWidth),
+    scrollMax:doc.defaultView.getComputedStyle(footer.querySelector('[data-composer-utility-bar-scroll-area]')).maxWidth,
+  }));
+ }});
+ footerChecks=results[0]?.result;
+ if(footerChecks?.length===3)break;
+ await new Promise(r=>setTimeout(r,50));
+}
+if(footerChecks?.length!==3||footerChecks.some(f=>f.max!=='100%'||f.min!=='0px'||f.scrollMax!=='100%'||f.width>f.host))throw Error('Shipped footer layout adapter did not apply: '+JSON.stringify(footerChecks));
 const ax=await chrome.debugger.sendCommand(debuggee,'Accessibility.getFullAXTree',{});
 const input=ax.nodes.find(n=>n.name?.value==='Repository search');
 if(!input)throw Error('Search input missing from AX tree');
@@ -139,7 +184,7 @@ const releasedGroup=await chrome.debugger.sendCommand(debuggee,'Runtime.callFunc
 if(!releasedGroup.exceptionDetails?.text)throw Error('Group cleanup retained the handle');
 const activeAfter=(await browser.tabs.query({active:true,currentWindow:true}))[0];
 if(activeAfter.id!==foreground.id||activations.includes(target.id))throw Error('CSP click activated background tab');
-await fetch(${JSON.stringify(url + "/result")},{method:'POST',body:JSON.stringify({ok:true,backgroundTabPreserved:true,strictCspAxClickTypeAndClear:true,objectCleanupAndExceptionContract:true,strictCspScreenshotAndEditor:true,lifecycle:lifecycle.map(e=>e.params.name),loaderId:lastLoad.params.loaderId})});
+await fetch(${JSON.stringify(url + "/result")},{method:'POST',body:JSON.stringify({ok:true,shippedFooterLayout:true,backgroundTabPreserved:true,strictCspAxClickTypeAndClear:true,objectCleanupAndExceptionContract:true,strictCspScreenshotAndEditor:true,lifecycle:lifecycle.map(e=>e.params.name),loaderId:lastLoad.params.loaderId})});
 }catch(e){await fetch(${JSON.stringify(url + "/result")},{method:'POST',body:JSON.stringify({ok:false,error:String(e)+' '+e.stack})});}})();`,
 );
 const child = spawn(

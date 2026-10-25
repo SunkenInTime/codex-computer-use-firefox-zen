@@ -1,0 +1,32 @@
+/* A sidebar is sized by its host, not by a top-level browser viewport. Keep
+   flex children shrinkable and the composer inside that host at narrow widths. */
+html[data-codex-window-type="chrome-extension"],
+html[data-codex-window-type="chrome-extension"] body,
+html[data-codex-window-type="chrome-extension"] #root {
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  min-height: 0;
+}
+
+/* The shipped ComposerFooter emits its CSS-module footer class, not a
+   data attribute. Keep the module hash flexible across bundle refreshes. */
+html[data-codex-window-type="chrome-extension"] [class*="_footer_"] {
+  min-width: 0;
+  max-width: 100%;
+}
+
+[data-composer-utility-bar-scroll-area] {
+  min-width: 0;
+  max-width: 100%;
+  overscroll-behavior-x: contain;
+}
+
+/* Keep every action reachable when the host is narrower than the Chromium
+   default sidebar. The full model/effort remains in the trigger's accessible
+   name and menu; hide the secondary effort label instead of shrinking text. */
+@container composer-footer (width <= 340px) {
+  [data-composer-navigation-target="reasoning"] [class*="_ModelPickerTriggerEffortLabel_"] {
+    display: none;
+  }
+}

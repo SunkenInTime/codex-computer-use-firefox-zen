@@ -20,3 +20,19 @@ assert.ok(upstreamImportIndex > handshakeIndex, "Upstream sidebar must load only
 assert.match(bootstrap, /getViews\?\.\(\{ type: "sidebar" \}\)\?\.includes\(window\)/u);
 
 console.log(JSON.stringify({ ok: true, hostAccessBeforeSidebarBoot: true, nativeSidebarIdentity: true, firefoxTabMentionsBeforeUpstreamBoot: true, sidebarReadyBeforeUpstreamBoot: true }, null, 2));
+
+const css = fs.readFileSync("extension/codex-sidepanel/firefox-sidebar-layout.css", "utf8");
+assert.ok(html.includes("firefox-sidebar-layout.css"));
+assert.match(css, /min-height:\s*0/u);
+assert.match(css, /@container composer-footer/u);
+assert.match(css, /overscroll-behavior-x:\s*contain/u);
+
+
+// Verify this selector against the class exported by the shipped component,
+// rather than merely checking that the intended CSS text exists.
+const footer = fs.readFileSync("extension/codex-sidepanel/assets/composer-footer-Cw2FUQYZ.js", "utf8");
+const footerClass = /footer:`([^`]+)`/u.exec(footer)?.[1];
+assert.ok(footerClass?.includes("_footer_"), "The shipped footer must match the layout adapter.");
+assert.ok(footer.includes("i.footer"), "The exported footer class must be used by the component.");
+assert.match(css, /\[class\*="_footer_"\]/u);
+assert.doesNotMatch(css, /\[data-composer-footer-responsive\]/u);
