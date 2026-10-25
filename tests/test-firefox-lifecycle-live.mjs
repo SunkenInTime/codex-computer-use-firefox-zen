@@ -90,6 +90,13 @@ const tree=await chrome.debugger.sendCommand(debuggee,'Page.getFrameTree',{});
 if(tree.frameTree.frame.loaderId!==lastLoad.params.loaderId)throw Error('Loader mismatch');
 const documentEvents=events.filter(e=>['Network.requestWillBeSent','Network.responseReceived'].includes(e.method)&&e.params.type==='Document'&&(e.params.request?.url??e.params.response?.url)===${JSON.stringify(url + "/next")}&&e.params.requestId.startsWith('firefox-request-'));
 if(!documentEvents.length||documentEvents.some(e=>e.params.loaderId!==lastLoad.params.loaderId))throw Error('Network loader mismatch: '+JSON.stringify({documentEvents, lifecycle}));
+if(${original.permissions.includes("declarativeNetRequestWithHostAccess")}){
+ const dnr=chrome.declarativeNetRequest;
+ await dnr.updateSessionRules({addRules:[{id:1000000,action:{type:dnr.RuleActionType.MODIFY_HEADERS,requestHeaders:[{header:'x-browser-agent',operation:dnr.HeaderOperation.SET,value:'fixture'}]},condition:{tabIds:[target.id],excludedInitiatorDomains:[browser.runtime.id],resourceTypes:['main_frame']}}]});
+ const rules=await browser.declarativeNetRequest.getSessionRules();
+ if(!rules.some(r=>r.id===1000000&&r.condition.excludedInitiatorDomains?.[0]===new URL(browser.runtime.getURL('/')).hostname))throw Error('Native DNR rule translation failed');
+ await dnr.updateSessionRules({removeRuleIds:[1000000]});
+}
 const ax=await chrome.debugger.sendCommand(debuggee,'Accessibility.getFullAXTree',{});
 const input=ax.nodes.find(n=>n.name?.value==='Repository search');
 if(!input)throw Error('Search input missing from AX tree');
@@ -139,7 +146,7 @@ const releasedGroup=await chrome.debugger.sendCommand(debuggee,'Runtime.callFunc
 if(!releasedGroup.exceptionDetails?.text)throw Error('Group cleanup retained the handle');
 const activeAfter=(await browser.tabs.query({active:true,currentWindow:true}))[0];
 if(activeAfter.id!==foreground.id||activations.includes(target.id))throw Error('CSP click activated background tab');
-await fetch(${JSON.stringify(url + "/result")},{method:'POST',body:JSON.stringify({ok:true,backgroundTabPreserved:true,strictCspAxClickTypeAndClear:true,objectCleanupAndExceptionContract:true,strictCspScreenshotAndEditor:true,lifecycle:lifecycle.map(e=>e.params.name),loaderId:lastLoad.params.loaderId})});
+await fetch(${JSON.stringify(url + "/result")},{method:'POST',body:JSON.stringify({ok:true,nativeDnrRules:${original.permissions.includes('declarativeNetRequestWithHostAccess')},backgroundTabPreserved:true,strictCspAxClickTypeAndClear:true,objectCleanupAndExceptionContract:true,strictCspScreenshotAndEditor:true,lifecycle:lifecycle.map(e=>e.params.name),loaderId:lastLoad.params.loaderId})});
 }catch(e){await fetch(${JSON.stringify(url + "/result")},{method:'POST',body:JSON.stringify({ok:false,error:String(e)+' '+e.stack})});}})();`,
 );
 const child = spawn(

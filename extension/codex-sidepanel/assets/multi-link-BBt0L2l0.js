@@ -1,0 +1,1 @@
+import{Et as e,Rn as t,Tn as n}from"./schemas-BXoq17dc.js";n({allowlisted_connector_ids:e(t().min(1))}).transform(({allowlisted_connector_ids:e})=>e).catch([]);function r(e){return e.startsWith(`asdk_app_`)?`connector_${e.slice(9)}`:e}export{r as t};

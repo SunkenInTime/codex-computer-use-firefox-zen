@@ -1,0 +1,1 @@
+import{t as e}from"./index.browser-l-_R1NME.js";import{l as t,t as n}from"./app-scope-_o3s1Ui4.js";import{t as r}from"./await-rpc-request-DTV0-G4i.js";var i=t(n,()=>({mutationFn:o,networkMode:`always`}));function a(e){o(e).catch(()=>void 0)}async function o(t){return r(e.openIn.open(t))}export{a as n,i as t};

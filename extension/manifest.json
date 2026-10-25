@@ -54,7 +54,8 @@
     "webNavigation",
     "webRequest",
     "webRequestBlocking",
-    "webRequestFilterResponse"
+    "webRequestFilterResponse",
+    "declarativeNetRequestWithHostAccess"
   ],
   "optional_permissions": [
     "downloads.open"
@@ -122,6 +123,17 @@
       "run_at": "document_end",
       "js": [
         "content-scripts/chatgpt-website.js"
+      ]
+    },
+    {
+      "matches": [
+        "https://chatgpt.com/*"
+      ],
+      "all_frames": true,
+      "run_at": "document_start",
+      "world": "MAIN",
+      "js": [
+        "content-scripts/codex-work-media-permission.js"
       ]
     }
   ],

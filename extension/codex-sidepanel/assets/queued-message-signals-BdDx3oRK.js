@@ -1,0 +1,1 @@
+import{i as e}from"./app-server-manager-signals-COqz12lX.js";import{h as t,t as n}from"./app-scope-_o3s1Ui4.js";import{St as r}from"./config-queries-DUP1-2DU.js";var i=t(n,e=>void 0,(t,{get:n,set:i})=>{if(t==null)return;n(e,t.hostId);let a=n(r);return i(void 0),a?.forHost(t.hostId).subscribe({type:`thread`,key:t,field:`queuedMessages`,listener:i})});export{i as t};

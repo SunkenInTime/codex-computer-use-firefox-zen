@@ -1,0 +1,1 @@
+async function e(e,t){let n=!1,r=()=>{n||(n=!0,e[Symbol.dispose]?.())};t?.addEventListener(`abort`,r,{once:!0});try{t?.throwIfAborted();let n=await e;return t?.throwIfAborted(),n}finally{t?.removeEventListener(`abort`,r),r()}}export{e as t};

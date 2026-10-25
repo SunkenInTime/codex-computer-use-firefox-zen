@@ -1,0 +1,1 @@
+function e(e){switch(e){case`change`:return`modified`;case`rename-pure`:case`rename-changed`:return`renamed`;case`new`:return`added`;case`deleted`:return`deleted`}}export{e as t};

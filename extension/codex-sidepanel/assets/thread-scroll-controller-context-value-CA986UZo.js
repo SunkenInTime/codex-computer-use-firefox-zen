@@ -1,0 +1,1 @@
+import{o as e}from"./rolldown-runtime-DAXXjFlN.js";import{t}from"./react-BUD3sqOU.js";var n=`PLEASE IMPLEMENT THIS PLAN:`;function r(e){return e.startsWith(n)}var i=e(t(),1),a=(0,i.createContext)(null);function o(){let e=(0,i.use)(a);if(e==null)throw Error(`useThreadScrollController must be used within ThreadScrollLayout`);return e}export{r as i,o as n,n as r,a as t};

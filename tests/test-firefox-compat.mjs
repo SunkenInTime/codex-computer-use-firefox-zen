@@ -410,6 +410,11 @@ const browser = {
   webRequest,
 };
 
+const sessionRuleUpdates = [];
+browser.declarativeNetRequest = {
+  async getSessionRules() { return []; },
+  async updateSessionRules(options) { sessionRuleUpdates.push(options); },
+};
 const context = vm.createContext({
   browser, console, URL, URLSearchParams, TextDecoder, TextEncoder, Uint8Array, ArrayBuffer,
   atob, btoa, structuredClone, setTimeout, clearTimeout, queueMicrotask,
@@ -425,6 +430,15 @@ const context = vm.createContext({
 });
 new vm.Script(source, { filename: "firefox-compat.js" }).runInContext(context);
 const compat = context.__chatgptFirefoxCompat;
+assert.equal(context.chrome.declarativeNetRequest.RuleActionType.MODIFY_HEADERS, "modifyHeaders");
+assert.equal(context.chrome.declarativeNetRequest.HeaderOperation.SET, "set");
+await context.chrome.declarativeNetRequest.updateSessionRules({ removeRuleIds: [], addRules: [{
+  id: 1000000,
+  action: { type: "modifyHeaders", requestHeaders: [{ header: "x-browser-agent", operation: "set", value: "fixture" }] },
+  condition: { excludedInitiatorDomains: [browser.runtime.id, "example.test"], tabIds: [1] },
+}] });
+assert.equal(sessionRuleUpdates[0].addRules[0].condition.excludedInitiatorDomains[0], "test");
+assert.equal(sessionRuleUpdates[0].addRules[0].condition.excludedInitiatorDomains[1], "example.test");
 assert.ok(compat?.debugger, "Compatibility debugger was not installed.");
 assert.equal(
   (await context.chrome.action.getUserSettings()).isOnToolbar,
@@ -525,6 +539,12 @@ assert.equal(keepsReadyChannelOpen, true, "Native Firefox sidebar readiness must
 await new Promise((resolve) => setTimeout(resolve, 0));
 assert.equal(packagedMessageCalls, 0, "The Firefox-only readiness handshake must not reach the packaged handler.");
 assert.equal(JSON.stringify(sidePanelReadyResponses), '[{"ok":true}]');
+assert.equal(JSON.stringify(storedValues.codexSidePanelOpenDestinations), '{"10":"local"}', "Current upstream destinations must be persisted before boot.");
+assert.equal((await compat.sidePanel.getOptions({})).path, "codex-sidepanel/index.html");
+await compat.sidePanel.setOptions({ enabled: false, tabId: 99 });
+assert.equal((await compat.sidePanel.getOptions({ tabId: 99 })).enabled, false);
+assert.equal((await compat.sidePanel.getOptions({})).enabled, true);
+await assert.rejects(compat.sidePanel.setOptions({ path: "codex-work-sidepanel.html" }), /local sidebar only/u);
 assert.equal(JSON.stringify(storedValues.codexSidePanelOpenWindowIds), "[10]", "Sidebar readiness must be persisted before upstream boot.");
 
 const rejectedReadyResponses = [];

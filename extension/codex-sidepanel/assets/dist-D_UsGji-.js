@@ -1,0 +1,1 @@
+import{t as e}from"./parsePatchFiles-CBadaO3X.js";import"./VirtualizedFileDiff-CZNBOxsk.js";import"./gitattributes-linguist-generated-BEooClxC.js";import"./feature-provider-D4pkuMQl.js";import"./use-code-diff-context-menu-CHM_Zx8w.js";import"./dist-BvRk9kiK.js";import"./text-file-editor-tab-content.electron-BEDnxuHM.js";export{e as parsePatchFiles};

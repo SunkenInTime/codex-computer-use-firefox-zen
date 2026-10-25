@@ -1,0 +1,1 @@
+import{t as e}from"./compiler-runtime-KOEWgTh7.js";import{t}from"./jsx-runtime-CFwixLRt.js";var n=e(),r=t();function i(e){let t=(0,n.c)(6),i,a;t[0]===e?(i=t[1],a=t[2]):({SideChatTab:i,...a}=e,t[0]=e,t[1]=i,t[2]=a);let o;return t[3]!==i||t[4]!==a?(o=(0,r.jsx)(i,{...a}),t[3]=i,t[4]=a,t[5]=o):o=t[5],o}export{i as SideChatTabContent};

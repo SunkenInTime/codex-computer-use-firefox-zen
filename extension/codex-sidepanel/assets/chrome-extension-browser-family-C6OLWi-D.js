@@ -1,0 +1,1 @@
+import{r as e}from"./chromiumBrowserRegistry-dOsp22l8.js";import"./chrome-extension-api-CA4oAU0c.js";function t(){return e(globalThis.navigator)}export{t};

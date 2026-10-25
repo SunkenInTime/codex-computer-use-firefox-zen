@@ -1,0 +1,1 @@
+import{X as e}from"./app-server-manager-signals-COqz12lX.js";import{t}from"./route-scope-BY8Pn6rv.js";import{_ as n}from"./app-scope-_o3s1Ui4.js";var r=n(t,({get:t,scope:n})=>{if(n.value.routeKind!==`local-thread`)return null;let r=t(e,n.value.conversationId);return r?.turnId==null?null:{threadId:n.value.conversationId,turnId:r.turnId}});export{r as t};

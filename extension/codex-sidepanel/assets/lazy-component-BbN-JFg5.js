@@ -1,0 +1,1 @@
+import{o as e}from"./rolldown-runtime-DAXXjFlN.js";import{t}from"./react-BUD3sqOU.js";import{t as n}from"./jsx-runtime-CFwixLRt.js";var r=e(t(),1),i=n();function a(e,{fallback:t=null,suspendToParent:n=!1}={}){let a=(0,r.lazy)(async()=>({default:await e()}));return n?a:function(e){return(0,i.jsx)(r.Suspense,{fallback:t,children:(0,i.jsx)(a,{...e})})}}export{a as t};

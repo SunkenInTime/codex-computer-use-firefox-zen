@@ -33,7 +33,7 @@ assert.match(html, /href="\.\/firefox-companion-setup\.css"/u);
 assert.match(bootstrap, /installFirefoxCompanionSetup\(\{ extension \}\)/u);
 assert.ok(
   bootstrap.indexOf("installFirefoxCompanionSetup") <
-    bootstrap.indexOf('await import("./assets/chrome-extension-sidepanel-Bf7FJEU3.js")'),
+    bootstrap.indexOf('await import("./assets/chrome-extension-sidepanel-'),
   "Companion error observation must begin before the upstream sidebar loads.",
 );
 assert.match(css, /height: 100vh/u);

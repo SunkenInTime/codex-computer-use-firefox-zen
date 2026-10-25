@@ -1,0 +1,1 @@
+var e=`Codex <noreply@openai.com>`;export{e as t};

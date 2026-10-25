@@ -1,0 +1,1 @@
+import{r as e}from"./codexSidePanelMessages-CQ99Zk8l.js";import{t}from"./chrome-extension-api-CA4oAU0c.js";var n=class extends Error{reason;constructor(e,t){super(t),this.reason=e,this.name=`ChromeExtensionAppServerConnectionError`}};function r(n){let r=t()?.runtime;if(r?.sendMessage==null)return;let i={reason:n,type:e};r.sendMessage(i).catch(()=>void 0)}export{r as n,n as t};

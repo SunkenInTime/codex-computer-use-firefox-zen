@@ -1,0 +1,1 @@
+import{o as e}from"./rolldown-runtime-DAXXjFlN.js";import{t}from"./react-BUD3sqOU.js";import{i as n,n as r,r as i}from"./icon-vpuypoP_.js";var a=e(t(),1);function o(e){let{asset:t,idPrefix:o,label:s,...c}=e,l=(0,a.useId)();return n(t,`icon`),i(t,r(t),c,l,o,s)}export{o as t};

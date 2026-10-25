@@ -1,0 +1,1 @@
+import{t as e}from"./route-scope-BY8Pn6rv.js";import{E as t}from"./app-scope-_o3s1Ui4.js";var n=t(`TabThumbnailScope`,{parent:e});export{n as t};

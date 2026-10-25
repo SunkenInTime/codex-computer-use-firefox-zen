@@ -1,0 +1,1 @@
+import{t as e}from"./registered-DY5cogqa.js";export{e as CreateTextFileTabThumbnail};

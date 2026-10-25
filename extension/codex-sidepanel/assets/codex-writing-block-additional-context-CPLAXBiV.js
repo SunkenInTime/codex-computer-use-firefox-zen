@@ -1,0 +1,1 @@
+import{il as e}from"./app-server-manager-signals-COqz12lX.js";import{y as t}from"./src-B6yVM-te.js";import{r as n}from"./persisted-atom-store-Gn56r1pe.js";function r(r,i,a){return i==null?a:t(r,e(i).map(e=>({turnId:e.turnId,messages:e.items.flatMap(e=>e.type===`agentMessage`?[e.text]:[])})),e=>n(e,void 0),a,!0)}export{r as t};

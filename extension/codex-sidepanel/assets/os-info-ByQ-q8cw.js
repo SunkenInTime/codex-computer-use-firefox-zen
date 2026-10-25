@@ -1,0 +1,1 @@
+import{t as e}from"./app-scope-_o3s1Ui4.js";import{a as t,c as n}from"./vscode-api-C0hdEJtp.js";var r=t(e,`os-info`,{staleTime:n.INFINITE});export{r as t};

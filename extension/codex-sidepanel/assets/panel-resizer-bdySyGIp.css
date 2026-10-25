@@ -1,0 +1,1 @@
+@layer components{._overlay_114d7_1{top:anchor(top);right:anchor(right);bottom:anchor(bottom);left:anchor(left)}[aria-hidden=true] ._overlay_114d7_1{visibility:hidden}body:has([role=dialog][data-state=open],[role=menu][data-state=open]) ._overlay_114d7_1{visibility:hidden}}

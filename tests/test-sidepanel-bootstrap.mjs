@@ -8,7 +8,10 @@ assert.match(html, /src="\.\/firefox-sidebar-bootstrap\.js"/u);
 assert.doesNotMatch(html, /src="\.\/assets\/chrome-extension-sidepanel-[^"]+\.js"/u);
 
 const handshakeIndex = bootstrap.indexOf("await extension.runtime.sendMessage");
-const upstreamImportIndex = bootstrap.indexOf('await import("./assets/chrome-extension-sidepanel-Bf7FJEU3.js")');
+const entry = /await import\("(\.\/assets\/chrome-extension-sidepanel-[^"]+\.js)"\)/u.exec(bootstrap);
+assert.ok(entry, 'Bootstrap must load the upstream sidebar module.');
+assert.ok(fs.existsSync(`extension/codex-sidepanel/${entry[1]}`), 'The upstream entry must be packaged.');
+const upstreamImportIndex = entry.index;
 const permissionGateIndex = bootstrap.indexOf("await ensureFirefoxHostAccess");
 const tabMentionProviderIndex = bootstrap.indexOf("__codexFirefoxTabMentionProviderAvailable = true");
 assert.ok(permissionGateIndex >= 0, "Bootstrap must check Firefox host access.");

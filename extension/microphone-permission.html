@@ -4,17 +4,20 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ChatGPT microphone access</title>
-    <script type="module" crossorigin src="/chunks/microphone-permission-D7brV0lH.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/microphone-permission-Cd4Ikd5o.css">
+    <script type="module" crossorigin src="/chunks/microphone-permission-C1jIdemt.js"></script>
+    <link rel="modulepreload" crossorigin href="/chunks/src-D-D8mhOs.js">
+    <link rel="stylesheet" crossorigin href="/assets/microphone-permission-CCsa_fHf.css">
   </head>
   <body>
     <main id="permission-help" hidden>
-      <h1>Allow microphone access</h1>
-      <p>
+      <h1 id="permission-title">Allow microphone access</h1>
+      <p id="permission-description">
         ChatGPT needs microphone access for dictation. Click the button, then
         choose Allow in <span id="browser-name">your browser</span>.
       </p>
-      <button id="allow-microphone" type="button">Allow microphone access</button>
+      <button id="allow-microphone" type="button">
+        Allow microphone access
+      </button>
       <p id="status" role="status"></p>
     </main>
   </body>

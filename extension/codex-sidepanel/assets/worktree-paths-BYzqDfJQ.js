@@ -1,0 +1,1 @@
+import{k as e}from"./src-VylWPNu6.js";import{F as t}from"./src-B6yVM-te.js";import"./path-8FI7ONm3.js";function n({codexHome:n,configuredWorktreesRoot:r,cwd:i}){return[r?.trim()||null,e(n)].some(e=>t({cwd:i,worktreesRoot:e}))}export{n as t};
