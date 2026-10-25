@@ -5,6 +5,17 @@ import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+const sidebarRoot = path.join(root, "extension/codex-sidepanel");
+const sidebarHtml = fs.readFileSync(path.join(sidebarRoot, "index.html"), "utf8");
+const typographySource = process.env.FIREFOX_SIDEBAR_TYPOGRAPHY_SOURCE
+  || path.join(sidebarRoot, "firefox-sidebar-typography.css");
+if (!fs.existsSync(typographySource)) {
+  throw new Error(`Typography stylesheet does not exist: ${typographySource}`);
+}
+const hasTypographyRegression = true;
+const setupStyles = ["firefox-host-access.css", "firefox-companion-setup.css"];
+const sidebarStyles = [...sidebarHtml.matchAll(/href="\.\/assets\/([^"/]+\.css)"/gu)].map(m => m[1]);
+const layerOrder = /@layer properties, theme, base, components, utilities;/u.exec(sidebarHtml)?.[0] || "";
 const firefoxBinary = process.env.FIREFOX_BINARY;
 if (!firefoxBinary)
   throw new Error(
@@ -45,6 +56,23 @@ const server = http.createServer((req, res) => {
       res.end("ok");
       finish(JSON.parse(body));
     });
+  } else if (req.url === "/typography") {
+    res.setHeader("content-type", "text/html");
+    res.end(`<html data-codex-window-type="chrome-extension"><head><style>${layerOrder}</style>
+      ${sidebarStyles.map(name => `<link rel="stylesheet" href="/sidebar-css/${name}">`).join("")}
+      <link rel="stylesheet" href="/font-compat.css">
+      ${setupStyles.map(name => `<link rel="stylesheet" href="/setup-css/${name}">`).join("")}</head><body>
+      ${["xs", "sm", "base"].map(size => `<button data-font="${size}" class="text-${size} font-medium">${size}</button>`).join("")}
+      <textarea data-font="textarea" class="text-base"></textarea>
+      <button data-font="copy" class="firefox-companion-setup__copy">Copy</button>
+      <button data-font="retry" class="firefox-companion-setup__retry">Try again</button>
+      <button data-font="permission" class="firefox-host-access__button">Allow access</button></body></html>`);
+  } else if (req.url === "/font-compat.css" || sidebarStyles.some(name => req.url === `/sidebar-css/${name}`)) {
+    res.setHeader("content-type", "text/css");
+    res.end(fs.readFileSync(req.url === "/font-compat.css" ? typographySource : path.join(sidebarRoot, "assets", req.url.slice("/sidebar-css/".length))));
+  } else if (setupStyles.some(name => req.url === `/setup-css/${name}`)) {
+    res.setHeader("content-type", "text/css");
+    res.end(fs.readFileSync(path.join(sidebarRoot, req.url.slice("/setup-css/".length))));
   } else if (req.url === "/fixture.css") {
     res.setHeader("content-type", "text/css");
     res.end(".editor {position:relative;margin-top:200vh}.overlay {position:absolute;inset:0;background:white}");
@@ -52,7 +80,7 @@ const server = http.createServer((req, res) => {
     res.setHeader("content-type", "text/html");
     res.setHeader("Content-Security-Policy", "default-src 'self'; script-src 'self'; object-src 'none'");
     res.end(
-      "<!doctype html><title>Lifecycle fixture</title><link rel='stylesheet' href='/fixture.css'><p>isolated lifecycle test</p><input aria-label='Repository search'><button>Search</button><textarea aria-label='Read-only editor' readonly>do not change</textarea><div class='editor'><textarea aria-label='Code editor'>old blueprint</textarea><div class='overlay'>Editor overlay</div></div>",
+      "<!doctype html><title>Lifecycle fixture</title><link rel='stylesheet' href='/fixture.css'><p>isolated lifecycle test</p><input aria-label='Repository search'><button>Search</button><textarea aria-label='Read-only editor' readonly>do not change</textarea><div class='editor'><textarea aria-label='Code editor'>old blueprint</textarea><div class='overlay'>Editor overlay</div></div>" + (hasTypographyRegression ? "<iframe id=\"typography\" src=\"/typography\"></iframe>" : ""),
     );
   }
 });
@@ -90,6 +118,15 @@ const tree=await chrome.debugger.sendCommand(debuggee,'Page.getFrameTree',{});
 if(tree.frameTree.frame.loaderId!==lastLoad.params.loaderId)throw Error('Loader mismatch');
 const documentEvents=events.filter(e=>['Network.requestWillBeSent','Network.responseReceived'].includes(e.method)&&e.params.type==='Document'&&(e.params.request?.url??e.params.response?.url)===${JSON.stringify(url + "/next")}&&e.params.requestId.startsWith('firefox-request-'));
 if(!documentEvents.length||documentEvents.some(e=>e.params.loaderId!==lastLoad.params.loaderId))throw Error('Network loader mismatch: '+JSON.stringify({documentEvents, lifecycle}));
+if(${hasTypographyRegression}){
+ const fonts=await browser.scripting.executeScript({target:{tabId:target.id},func:()=>{
+  const doc=document.querySelector('#typography').contentDocument;
+  return [...doc.querySelectorAll('[data-font]')].map(e=>({name:e.dataset.font,size:doc.defaultView.getComputedStyle(e).fontSize,weight:doc.defaultView.getComputedStyle(e).fontWeight}));
+ }});
+ const expected={xs:['12px','500'],sm:['13px','500'],base:['14px','500'],textarea:['14px',null],copy:['13px','500'],retry:['13px','500'],permission:[null,'600']};
+ if(fonts[0]?.result?.length!==7)throw Error('Typography fixture did not load');
+ for(const font of fonts[0].result)if((expected[font.name][0]&&font.size!==expected[font.name][0])||(expected[font.name][1]&&font.weight!==expected[font.name][1]))throw Error('Font reset overrides typography: '+JSON.stringify(font));
+}
 const ax=await chrome.debugger.sendCommand(debuggee,'Accessibility.getFullAXTree',{});
 const input=ax.nodes.find(n=>n.name?.value==='Repository search');
 if(!input)throw Error('Search input missing from AX tree');
@@ -139,7 +176,7 @@ const releasedGroup=await chrome.debugger.sendCommand(debuggee,'Runtime.callFunc
 if(!releasedGroup.exceptionDetails?.text)throw Error('Group cleanup retained the handle');
 const activeAfter=(await browser.tabs.query({active:true,currentWindow:true}))[0];
 if(activeAfter.id!==foreground.id||activations.includes(target.id))throw Error('CSP click activated background tab');
-await fetch(${JSON.stringify(url + "/result")},{method:'POST',body:JSON.stringify({ok:true,backgroundTabPreserved:true,strictCspAxClickTypeAndClear:true,objectCleanupAndExceptionContract:true,strictCspScreenshotAndEditor:true,lifecycle:lifecycle.map(e=>e.params.name),loaderId:lastLoad.params.loaderId})});
+await fetch(${JSON.stringify(url + "/result")},{method:'POST',body:JSON.stringify({ok:true,sidebarTypography:${hasTypographyRegression},backgroundTabPreserved:true,strictCspAxClickTypeAndClear:true,objectCleanupAndExceptionContract:true,strictCspScreenshotAndEditor:true,lifecycle:lifecycle.map(e=>e.params.name),loaderId:lastLoad.params.loaderId})});
 }catch(e){await fetch(${JSON.stringify(url + "/result")},{method:'POST',body:JSON.stringify({ok:false,error:String(e)+' '+e.stack})});}})();`,
 );
 const child = spawn(
@@ -158,6 +195,7 @@ const child = spawn(
     firefoxBinary,
     "--no-reload",
     "--args=-headless",
+    "--pref=font.size.variable.x-western=20",
   ],
   { stdio: ["ignore", "pipe", "pipe"], detached: process.platform !== "win32" },
 );
