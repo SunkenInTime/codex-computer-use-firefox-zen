@@ -1,0 +1,1 @@
+import{g as e,t}from"./app-scope-_o3s1Ui4.js";var n=e(t,e=>[]);function r(e,t){if(t.targetThreadId.trim().length===0)throw Error(`A target thread ID is required`);e.set(n,t.targetThreadId,e=>[...e,t])}export{r as t};

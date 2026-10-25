@@ -35,7 +35,7 @@ function appendElement(document, parent, tagName, className, text) {
 }
 
 // The same Codex blossom mark the upstream onboarding surface renders.
-export const CODEX_LOGO_PATH = "codex-sidepanel/assets/app-D0g8sCle.png";
+export const CODEX_LOGO_PATH = "images/firefox-companion-logo.png";
 
 function appendCodexLogo(document, parent, extension) {
   const logo = appendElement(document, parent, "img", "firefox-companion-setup__logo");

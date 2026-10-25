@@ -9,37 +9,59 @@
     <meta name="color-scheme" content="light dark" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>ChatGPT</title>
+    <!-- Dependency CSS can load before app.css, so establish Tailwind's layer order here. -->
+    <style>
+      @layer properties, theme, base, components, utilities;
+    </style>
     <script src="./firefox-focus-compat.js"></script>
     <script type="module" crossorigin src="./firefox-sidebar-bootstrap.js"></script>
-    <link rel="stylesheet" href="./firefox-host-access.css">
-    <link rel="modulepreload" crossorigin href="./assets/rolldown-runtime-C_JxhDyB.js">
-    <link rel="modulepreload" crossorigin href="./assets/jsx-runtime-CNO-vQvX.js">
-    <link rel="modulepreload" crossorigin href="./assets/preload-helper-DYl5dUZ5.js">
-    <link rel="modulepreload" crossorigin href="./assets/default-DB4ZMZxa.js">
-    <link rel="modulepreload" crossorigin href="./assets/index.browser-DtavBX6E.js">
-    <link rel="modulepreload" crossorigin href="./assets/react-dom-C27rAsGK.js">
-    <link rel="modulepreload" crossorigin href="./assets/client-DpueprnI.js">
+    <link rel="modulepreload" crossorigin href="./assets/rolldown-runtime-DAXXjFlN.js">
+    <link rel="modulepreload" crossorigin href="./assets/react-BUD3sqOU.js">
+    <link rel="modulepreload" crossorigin href="./assets/compiler-runtime-KOEWgTh7.js">
+    <link rel="modulepreload" crossorigin href="./assets/chromiumBrowserRegistry-dOsp22l8.js">
+    <link rel="modulepreload" crossorigin href="./assets/codexSidePanelMessages-CQ99Zk8l.js">
+    <link rel="modulepreload" crossorigin href="./assets/schemas-BXoq17dc.js">
+    <link rel="modulepreload" crossorigin href="./assets/isEqual-BQkN1IlS.js">
+    <link rel="modulepreload" crossorigin href="./assets/identity-B6_hpF2c.js">
+    <link rel="modulepreload" crossorigin href="./assets/preload-helper-HclGiUj8.js">
+    <link rel="modulepreload" crossorigin href="./assets/src-VylWPNu6.js">
+    <link rel="modulepreload" crossorigin href="./assets/chrome-extension-api-CA4oAU0c.js">
+    <link rel="modulepreload" crossorigin href="./assets/lib-F9LCah9T.js">
+    <link rel="modulepreload" crossorigin href="./assets/persisted-atom-store-Gn56r1pe.js">
+    <link rel="modulepreload" crossorigin href="./assets/path-8FI7ONm3.js">
+    <link rel="modulepreload" crossorigin href="./assets/queryObserver-D8v1tdIz.js">
+    <link rel="modulepreload" crossorigin href="./assets/jsx-runtime-CFwixLRt.js">
+    <link rel="modulepreload" crossorigin href="./assets/app-scope-_o3s1Ui4.js">
+    <link rel="modulepreload" crossorigin href="./assets/vscode-singleton.browser-BjAZ9ZUo.js">
+    <link rel="modulepreload" crossorigin href="./assets/index.browser-l-_R1NME.js">
+    <link rel="modulepreload" crossorigin href="./assets/react-dom-DmHqBZ9-.js">
+    <link rel="modulepreload" crossorigin href="./assets/client-CkPScjoH.js">
     <link rel="modulepreload" crossorigin href="./assets/tslib.es6-C98rlihb.js">
-    <link rel="modulepreload" crossorigin href="./assets/lib-XezuRCrl.js">
-    <link rel="modulepreload" crossorigin href="./assets/spinner-UOQEjs68.js">
-    <link rel="modulepreload" crossorigin href="./assets/openai-blossom-D_4MyPKS.js">
+    <link rel="modulepreload" crossorigin href="./assets/utils-D-FOaZpi.js">
+    <link rel="modulepreload" crossorigin href="./assets/message-nyJ-gHNb.js">
+    <link rel="modulepreload" crossorigin href="./assets/createIntl-Cfr9FJXc.js">
+    <link rel="modulepreload" crossorigin href="./assets/arrow-rotate-ccw-RTMJyqpD.js">
+    <link rel="modulepreload" crossorigin href="./assets/download-BYKbvNS9.js">
+    <link rel="modulepreload" crossorigin href="./assets/clsx-CjueKrWZ.js">
+    <link rel="modulepreload" crossorigin href="./assets/openai-blossom-ByNwwv5y.js">
     <link rel="modulepreload" crossorigin href="./assets/data-url-from-svg-Cpm_ULIa.js">
-    <link rel="modulepreload" crossorigin href="./assets/openai-blossom-shimmer-CCd8H2NF.js">
-    <link rel="modulepreload" crossorigin href="./assets/progression-donut-DjRhw9Tk.js">
-    <link rel="modulepreload" crossorigin href="./assets/arrow-rotate-ccw-C_5PYb9q.js">
-    <link rel="modulepreload" crossorigin href="./assets/download-Dn_apvm5.js">
-    <link rel="modulepreload" crossorigin href="./assets/folder-open-9op8WDQP.js">
-    <link rel="modulepreload" crossorigin href="./assets/homepage-chatgpt-logo-D1GTfDzZ.js">
-    <link rel="modulepreload" crossorigin href="./assets/app-window-BxbNfq2F.js">
-    <link rel="modulepreload" crossorigin href="./assets/chrome-extension-update-required-surface-Bdi675VS.js">
+    <link rel="modulepreload" crossorigin href="./assets/openai-blossom-shimmer-y4HjkPRF.js">
+    <link rel="modulepreload" crossorigin href="./assets/progression-donut-C18PtA9y.js">
+    <link rel="modulepreload" crossorigin href="./assets/homepage-chatgpt-logo-DSMsdTbS.js">
+    <link rel="modulepreload" crossorigin href="./assets/spinner-CbGEf1qa.js">
+    <link rel="modulepreload" crossorigin href="./assets/chrome-extension-sidepanel-status-surface-DUkNfCXV.js">
+    <link rel="modulepreload" crossorigin href="./assets/chrome-extension-update-required-surface-D8PpOUrS.js">
+    <link rel="modulepreload" crossorigin href="./assets/chrome-extension-app-server-connection-telemetry-D0wkUiyC.js">
+    <link rel="modulepreload" crossorigin href="./assets/chrome-extension-browser-family-C6OLWi-D.js">
     <link rel="modulepreload" crossorigin href="./assets/chrome-extension-microphone-permission-tab-DF1KPBxT.js">
     <link rel="modulepreload" crossorigin href="./assets/chrome-extension-sidepanel-open-state-CLbejI4I.js">
-    <link rel="modulepreload" crossorigin href="./assets/chunk-LFPYN7LY-CHLjWbO9.js">
-    <link rel="modulepreload" crossorigin href="./assets/chrome-extension-sidepanel-route-persistence-D4JZsyZn.js">
-    <link rel="stylesheet" crossorigin href="./assets/openai-blossom-shimmer-BnZ_Mrxk.css">
-    <link rel="stylesheet" crossorigin href="./assets/progression-donut-BTleCTWE.css">
-    <link rel="stylesheet" crossorigin href="./assets/app-window-9qbkMWnL.css">
-    <link rel="stylesheet" crossorigin href="./assets/chrome-extension-sidepanel-Bw4Xnpx7.css">
+    <link rel="modulepreload" crossorigin href="./assets/chunk-KS7C4IRE-CzvFGEb8.js">
+    <link rel="modulepreload" crossorigin href="./assets/chrome-extension-sidepanel-route-persistence-B8NTXwMZ.js">
+    <link rel="stylesheet" crossorigin href="./assets/openai-blossom-shimmer-XyicN9LM.css">
+    <link rel="stylesheet" crossorigin href="./assets/progression-donut-gEwcYa_k.css">
+    <link rel="stylesheet" crossorigin href="./assets/chrome-extension-sidepanel-status-surface-Bo8BHaXs.css">
+    <link rel="stylesheet" crossorigin href="./assets/chrome-extension-sidepanel-aQf-8vya.css">
+    <link rel="stylesheet" href="./firefox-host-access.css">
     <link rel="stylesheet" href="./firefox-companion-setup.css">
   </head>
   <body>

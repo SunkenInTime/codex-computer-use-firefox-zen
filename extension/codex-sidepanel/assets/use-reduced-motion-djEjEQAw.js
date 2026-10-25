@@ -1,0 +1,1 @@
+import{a as e}from"./app-scope-_o3s1Ui4.js";import{on as t}from"./tab-controller-Q53FdHoh.js";function n(){return e(t)}export{n as t};

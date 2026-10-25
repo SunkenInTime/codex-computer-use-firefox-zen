@@ -1,0 +1,1 @@
+import{h as e,t}from"./app-scope-_o3s1Ui4.js";import{r as n}from"./statsig-gate-signal-D9l66S1Q.js";var r=e(t,(e,{get:t})=>t(n)?.getDynamicConfig(e)??null,(e,{get:t,set:r})=>{let i=t(n);if(i==null)return;let a=()=>{r(i.getDynamicConfig(e))};return i.on(`values_updated`,a),()=>{i.off(`values_updated`,a)}});export{r as t};

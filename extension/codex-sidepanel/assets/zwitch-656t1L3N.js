@@ -1,0 +1,1 @@
+var e={}.hasOwnProperty;function t(t,n){let r=n||{};function i(n,...r){let a=i.invalid,o=i.handlers;if(n&&e.call(n,t)){let r=String(n[t]);a=e.call(o,r)?o[r]:i.unknown}if(a)return a.call(this,n,...r)}return i.handlers=r.handlers||{},i.invalid=r.invalid,i.unknown=r.unknown,i}export{t};

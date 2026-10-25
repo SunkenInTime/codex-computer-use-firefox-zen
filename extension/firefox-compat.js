@@ -318,9 +318,10 @@
         ? stored[storageKey].filter((id) => Number.isSafeInteger(id))
         : [],
     );
-    if (windowIds.has(windowId)) {
-      return;
-    }
+    const destinationKey = "codexSidePanelOpenDestinations";
+    const destinations = (await firefox.storage.session.get(destinationKey))[destinationKey] ?? {};
+    await firefox.storage.session.set({ [destinationKey]: { ...destinations, [windowId]: "local" } });
+    if (windowIds.has(windowId)) return;
     windowIds.add(windowId);
     await firefox.storage.session.set({ [storageKey]: [...windowIds] });
     sidePanelOpened.emit({ windowId });
@@ -398,7 +399,22 @@
     },
   });
 
+  const sidePanelOptionsByTab = new Map();
+  let defaultSidePanelOptions = { enabled: true, path: "codex-sidepanel/index.html" };
   const sidePanelCompat = {
+    async getOptions({ tabId } = {}) {
+      return { ...defaultSidePanelOptions, ...(sidePanelOptionsByTab.get(tabId) ?? {}), ...(tabId == null ? {} : { tabId }) };
+    },
+    async setOptions({ tabId, ...options }) {
+      // Firefox has one native sidebar, not Chrome's per-tab side-panel hosts.
+      // Keep option queries coherent, but do not switch to the Chrome-only Work
+      // host or disable the user's native sidebar on a background tab update.
+      if (options.path != null && options.path !== "codex-sidepanel/index.html") {
+        throw new Error("The Firefox port supports the local sidebar only.");
+      }
+      if (tabId == null) defaultSidePanelOptions = { ...defaultSidePanelOptions, ...options };
+      else sidePanelOptionsByTab.set(tabId, { ...sidePanelOptionsByTab.get(tabId), ...options });
+    },
     onOpened: sidePanelOpened,
     onClosed: sidePanelClosed,
     setPanelBehavior: async () => {},
@@ -4604,6 +4620,7 @@
   });
 
   firefox.tabs.onRemoved.addListener((tabId) => {
+    sidePanelOptionsByTab.delete(tabId);
     clearLifecycleState(tabId);
     navigationStateByTab.delete(tabId);
     initScriptsByTab.delete(tabId);
@@ -4728,6 +4745,38 @@
     return Promise.resolve({ ok: true });
   });
 
+  // Firefox exposes the DNR methods and ResourceType enum, but not Chromium's
+  // RuleActionType/HeaderOperation constants. The refreshed lease reconciler
+  // uses those constants when a tab is first claimed, not during idle startup.
+  const declarativeNetRequestCompat = firefox.declarativeNetRequest == null ? undefined
+    : new Proxy(firefox.declarativeNetRequest, {
+      get(target, property) {
+        if (property === "RuleActionType") return target.RuleActionType ?? {
+          ALLOW: "allow", ALLOW_ALL_REQUESTS: "allowAllRequests", BLOCK: "block",
+          MODIFY_HEADERS: "modifyHeaders", REDIRECT: "redirect", UPGRADE_SCHEME: "upgradeScheme",
+        };
+        if (property === "HeaderOperation") return target.HeaderOperation ?? {
+          APPEND: "append", REMOVE: "remove", SET: "set",
+        };
+        if (property === "updateSessionRules") return (options) => {
+          const hostname = new URL(firefox.runtime.getURL("/")).hostname;
+          const domains = (values) => values?.map((value) => value === firefox.runtime.id ? hostname : value);
+          return target.updateSessionRules({
+            ...options,
+            addRules: options.addRules?.map((rule) => ({
+              ...rule,
+              condition: {
+                ...rule.condition,
+                ...(rule.condition?.initiatorDomains ? { initiatorDomains: domains(rule.condition.initiatorDomains) } : {}),
+                ...(rule.condition?.excludedInitiatorDomains ? { excludedInitiatorDomains: domains(rule.condition.excludedInitiatorDomains) } : {}),
+              },
+            })),
+          });
+        };
+        return bindValue(target, property);
+      },
+    });
+
   const chromeCompat = new Proxy(firefox, {
     get(target, property) {
       if (property === "runtime") {
@@ -4741,6 +4790,9 @@
       }
       if (property === "sidePanel") {
         return sidePanelCompat;
+      }
+      if (property === "declarativeNetRequest") {
+        return declarativeNetRequestCompat;
       }
       return bindValue(target, property);
     },

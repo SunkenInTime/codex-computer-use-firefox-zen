@@ -1,0 +1,1 @@
+import{t as e}from"./use-hotkey-htNb-hsb.js";function t(t,n){t.defaultPrevented||!e(t.nativeEvent,`CmdOrCtrl+S`)||!(t.target instanceof Node)||!t.currentTarget.contains(t.target)||(t.preventDefault(),t.stopPropagation(),t.repeat||n())}export{t};

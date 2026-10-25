@@ -117,7 +117,7 @@ The compatibility layer adds:
 - translated network capture, `Fetch` interception, emulation, dialogs, and viewport restoration;
 - native bridge version reporting so the add-on can detect and explain an out-of-sync installation.
 
-The port currently tracks OpenAI packaged extension version `1.2.27236.6274` (build `ad34341c30168f421705cd15f1633ebe6cea7849`). The inherited application code is byte-for-byte identical for the documented paths; the port changes only browser compatibility and packaging layers.
+The port currently tracks OpenAI packaged extension version `1.26.901.11451` (build `834ab2c3159a7637c75db757ad053344da009e8b`). The imported assets retain upstream bytes except for the reproducible Firefox tab-mention adapter in `scripts/apply-upstream-patches.mjs`. The Firefox native companion remains unchanged at 1.4.12.
 
 ## Local development
 

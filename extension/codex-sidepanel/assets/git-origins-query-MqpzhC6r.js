@@ -1,0 +1,1 @@
+import{t as e}from"./git-origins-query-CidvWq1x.js";export{e as gitOriginsQuery$};

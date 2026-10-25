@@ -1,0 +1,1 @@
+import"./chromiumBrowserRegistry-dOsp22l8.js";function e(){return typeof chrome>`u`?null:chrome}function t(){let t=e();if(t==null)throw Error(`Chrome extension API is unavailable`);return t}async function n(t){let n=e()?.runtime;if(n?.sendMessage==null)throw Error(`Chrome runtime messaging is unavailable.`);return n.sendMessage(t)}export{t as n,n as r,e as t};

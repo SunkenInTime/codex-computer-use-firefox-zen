@@ -180,7 +180,14 @@ let totalBytes = 0;
 for (const entry of fs.readdirSync(extensionDirectory, { recursive: true, withFileTypes: true })) {
   if (!entry.isFile()) continue;
   fileCount += 1;
-  totalBytes += fs.statSync(path.join(entry.parentPath, entry.name)).size;
+  const filename = path.join(entry.parentPath, entry.name);
+  totalBytes += fs.statSync(filename).size;
+  if (entry.name.endsWith(".js")) {
+    const source = fs.readFileSync(filename, "utf8");
+    for (const match of source.matchAll(/\b(?:from\s*|import\s*\()\s*["`]((?:\.\/|\.\.\/)[^"`\s]+\.js)["`]/gu)) {
+      assert(fs.existsSync(path.resolve(entry.parentPath, match[1])), `Missing module dependency in ${entry.name}: ${match[1]}`);
+    }
+  }
 }
 
 console.log(JSON.stringify({

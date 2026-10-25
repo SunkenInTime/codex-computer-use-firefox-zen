@@ -1,0 +1,1 @@
+import{n as e,t}from"./workspace-file-tab-context-menu-BqXeq-x9.js";export{t as getWorkspaceFileTabContextMenuItems,e as prefetchWorkspaceFileTabContextMenuItems};

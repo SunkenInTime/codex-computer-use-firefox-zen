@@ -1,0 +1,1 @@
+import{n as e}from"./use-register-command-Dfl6Wods.js";function t(t){let n=/^\s*\/feedback(?:\s+([\s\S]*))?\s*$/.exec(t);return n!=null&&e(`feedback`,`composer_slash_command`,{feedbackDetails:n[1]?.trim()??``})}export{t};

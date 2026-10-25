@@ -1,0 +1,1 @@
+import{c as e}from"./statsig-BdYFwS32.js";var t=`3097504420`;function n(){return e(t)}export{n as t};

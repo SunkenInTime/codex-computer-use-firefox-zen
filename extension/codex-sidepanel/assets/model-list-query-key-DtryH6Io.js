@@ -1,0 +1,1 @@
+var e=[`models`,`list`];function t(t,n,r=100){return[...e,t,n??`no-auth`,r]}export{t as n,e as t};

@@ -1,0 +1,1 @@
+import{t as e}from"./createIntl-Cfr9FJXc.js";import{b as t,t as n}from"./app-scope-_o3s1Ui4.js";var r=t(n,e({locale:`en`,messages:{}}));export{r as t};

@@ -1,0 +1,1 @@
+import{_ as e,b as t,t as n}from"./app-scope-_o3s1Ui4.js";var r=t(n,[]),i=e(n,({get:e})=>{let t=[];for(let{hostId:n,pluginId:i}of e(r))t.some(e=>e.hostId===n&&e.pluginId===i)||t.push({hostId:n,pluginId:i});return t},{isEqual:(e,t)=>e.length===t.length&&e.every((e,n)=>e.hostId===t[n]?.hostId&&e.pluginId===t[n]?.pluginId)});export{i as t};

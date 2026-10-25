@@ -1,0 +1,1 @@
+import{j as e}from"./src-B6yVM-te.js";async function t(t,n,r){let i={includeLayers:!1,cwd:n??null};return e((r==null?await t.sendRequest(`config/read`,i):await t.sendRequest(`config/read`,i,r)).config)}export{t};

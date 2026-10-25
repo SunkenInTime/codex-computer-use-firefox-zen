@@ -1,0 +1,1 @@
+import{Rn as e}from"./schemas-BXoq17dc.js";var t=e().regex(/\S/);export{t};

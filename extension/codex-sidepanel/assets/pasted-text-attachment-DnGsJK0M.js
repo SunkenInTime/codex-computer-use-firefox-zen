@@ -1,0 +1,1 @@
+var e=5e3,t=25e3;function n(e){return e>=5e3&&e<=25e3}export{t as n,n as r,e as t};

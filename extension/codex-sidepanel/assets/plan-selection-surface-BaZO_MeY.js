@@ -1,0 +1,1 @@
+import{n as e}from"./markdown-renderer-DGzrhBbW.js";var t=`data-plan-selection-surface`;function n(n){return`[${t}="${r(n)}"] [${e}]`}function r(e){return typeof CSS<`u`&&typeof CSS.escape==`function`?CSS.escape(e):e.replace(/\\/g,`\\\\`).replace(/"/g,`\\"`)}export{n,t};

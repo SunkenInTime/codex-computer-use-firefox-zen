@@ -1,0 +1,1 @@
+import{_ as e,b as t,t as n}from"./app-scope-_o3s1Ui4.js";var r=t(n,{x:null,y:null,hasKnownVelocity:!1,updatedAt:null,velocityX:0,velocityY:0,speed:0});t(n,{width:window.innerWidth,height:window.innerHeight});var i={px$:e(n,({get:e})=>e(r).x)};export{r as n,i as t};

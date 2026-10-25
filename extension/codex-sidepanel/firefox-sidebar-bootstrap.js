@@ -27,7 +27,7 @@ if (isFirefox && !await ensureFirefoxHostAccess({ extension })) {
     // Let the upstream surface render its normal recovery state if Firefox
     // cannot identify or acknowledge the native sidebar window.
   }
-  await import("./assets/chrome-extension-sidepanel-Bf7FJEU3.js");
+  await import("./assets/chrome-extension-sidepanel-CNnuWRhV.js");
 } else {
-  await import("./assets/chrome-extension-sidepanel-Bf7FJEU3.js");
+  await import("./assets/chrome-extension-sidepanel-CNnuWRhV.js");
 }

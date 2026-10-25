@@ -1,0 +1,1 @@
+import{t as e}from"./compiler-runtime-KOEWgTh7.js";import{t}from"./message-nyJ-gHNb.js";import{t as n}from"./jsx-runtime-CFwixLRt.js";import{t as r}from"./reasoning-effort-label-messages-SrTLwfPu.js";var i=e(),a=n();function o(e){let n=(0,i.c)(2),{effort:o}=e,s=r[o],c;return n[0]===s?c=n[1]:(c=(0,a.jsx)(t,{...s}),n[0]=s,n[1]=c),c}export{o as t};
