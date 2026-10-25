@@ -193,3 +193,8 @@ This optional test uses `web-ext` and a disposable headless profile, never your
 signed-in profile. It exercises the real compatibility layer against local
 HTTP fixtures and verifies lifecycle delivery and foreground-tab preservation.
 It does not exercise the signed-in Codex native transport.
+
+For an unsigned review build on macOS, Linux, or Windows, commit the working tree
+and run `pnpm package:portable`. It uses Node and Git, writes ZIP/XPI and a review-source
+archive under `dist/`, and preserves the release checksum filenames. The existing
+PowerShell packaging command and release workflow are unchanged.
